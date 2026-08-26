@@ -1,53 +1,48 @@
-# Mesen Community Edition
+# MesenMCP
 
-Mesen is a multi-system emulator for Windows, Linux, and macOS. It supports NES, SNES, Game Boy (GB/SGB/GBC), Game Boy Advance, PC Engine, SMS/Game Gear, and WonderSwan (WS/WSC).
+Headless [MCP](https://modelcontextprotocol.io/) server around the Mesen emulation core,
+built so AI agents can validate and debug NES (and later SNES/GBA) homebrew without any
+display server, audio device or .NET runtime.
 
-This is a community-managed fork, created to maintain and expand this emulator into the future.
+```
+mesen-mcp --rom game.nes --frames 300 --screenshot out.png
+```
 
-## Releases
+The build is a single native binary (`bin/mesen-mcp`) linked from the untouched
+`Core/`, `Utilities/`, `Lua/` and `SevenZip/` trees plus the headless front-end in
+`Mcp/`. It has **no SDL, X11, Wayland or evdev dependency** - video frames are captured
+in memory by a headless rendering device and can be written as PNG screenshots; audio
+and desktop input are simply not wired up.
 
-The latest stable version is available from the [releases page on GitHub](https://github.com/nesdev-org/MesenCE/releases).
+## Status
 
-## Development Builds
+- **P0 (done)** - headless proof of concept CLI: load a ROM, run N frames at maximum
+  speed, dump a PNG screenshot, exit. Verified against public NES test ROMs
+  (blargg's full palette / vbl-nmi suites) with no `$DISPLAY` present.
+- **P1 (next)** - the actual MCP server over stdio (JSON-RPC 2.0): load/pause/resume,
+  run N frames, screenshot, memory read/write, CPU state, disassembly.
+  See [MCP_PLAN.md](MCP_PLAN.md) for the full roadmap.
 
-[![Mesen](https://github.com/nesdev-org/MesenCE/actions/workflows/build.yml/badge.svg)](https://github.com/nesdev-org/MesenCE/actions/workflows/build.yml?query=branch%3Amaster)
+## Building
 
-* [Windows](https://nightly.link/nesdev-org/MesenCE/workflows/build/master/Mesen%20%28Windows%20-%20net10.0%20-%20AoT%29.zip)
-  * Windows 7 or higher is required. Windows 7 users must use SP1 and have all updates installed.
-* [Linux x64](https://nightly.link/nesdev-org/MesenCE/workflows/build/master/Mesen%20%28Linux%20-%20ubuntu-22.04%20-%20clang_aot%29.zip)  (requires **SDL2**)  
-* [Linux ARM64](https://nightly.link/nesdev-org/MesenCE/workflows/build/master/Mesen%20%28Linux%20-%20ubuntu-22.04-arm%20-%20clang_aot%29.zip)  (requires **SDL2**)  
-* [macOS - Intel](https://nightly.link/nesdev-org/MesenCE/workflows/build/master/Mesen%20%28macOS%20-%20macos-15-intel%20-%20clang_aot%29.zip)  (requires **SDL2**)  
-* [macOS - Apple Silicon](https://nightly.link/nesdev-org/MesenCE/workflows/build/master/Mesen%20%28macOS%20-%20macos-15%20-%20clang_aot%29.zip)  (requires **SDL2**)  
+Requires a C++17 compiler (g++ or clang++) and python3 for the test ROM generator:
 
-#### <ins>Notes</ins> ####
+```
+make          # build bin/mesen-mcp
+make test     # build + generate a test ROM and run the headless smoke test
+make clean    # remove build outputs
+```
 
-* Other builds are also available in the [Actions](https://github.com/nesdev-org/MesenCE/actions/workflows/build.yml?query=branch%3Amaster) tab.
-* **macOS**: Builds are self-signed and will require approval via Gatekeeper before they are able to be run.  
-* **SteamOS**: See [SteamOS.md](SteamOS.md)  
+`DEBUG=1 make` builds unoptimized with debug info; `SANITIZER=address make` adds ASan.
 
-## Compiling
+## Layout
 
-See [COMPILING.md](COMPILING.md)
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md)
+| Path | Purpose |
+|---|---|
+| `Mcp/` | Headless front-end (renderer, CLI entry point; MCP server in P1) |
+| `Core/` | Mesen emulation core (NES/SNES/GB/GBA/PCE/SMS/WS) - unchanged |
+| `Utilities/`, `Lua/`, `SevenZip/` | Core support libraries - unchanged |
 
 ## License
 
-Mesen is available under the GPL V3 license.  Full text here: <http://www.gnu.org/licenses/gpl-3.0.en.html>
-
-Copyright (C) 2014-2026 Sour, 2026 contributors
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
+GPLv3, as Mesen. See [LICENSE](LICENSE).

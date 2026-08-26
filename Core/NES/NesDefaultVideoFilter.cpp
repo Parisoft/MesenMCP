@@ -129,6 +129,12 @@ uint32_t NesDefaultVideoFilter::GetDefaultPixelBrightness(uint16_t colorIndex, P
 	return (argbColor & 0xFF) + ((argbColor >> 8) & 0xFF) + ((argbColor >> 16) & 0xFF);
 }
 
+void NesDefaultVideoFilter::GetBuiltInPalette(uint32_t palette[512])
+{
+	memcpy(palette, _ppuPaletteArgb[0], 64 * sizeof(uint32_t));
+	GenerateFullColorPalette(palette, PpuModel::Ppu2C02);
+}
+
 void NesDefaultVideoFilter::InitLookupTable()
 {
 	VideoConfig& videoCfg = _emu->GetSettings()->GetVideoConfig();
