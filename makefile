@@ -62,11 +62,14 @@ obj/%.c.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-#Headless smoke test: builds the binary, generates a tiny test ROM, runs it for
-#300 frames with no display server and dumps a PNG screenshot of the final frame.
+#Headless smoke tests:
+#1. P0 CLI: generate a tiny test ROM, run it for 300 frames with no display
+#   server and dump a PNG screenshot of the final frame.
+#2. MCP stdio protocol: full client session against the server binary.
 test: $(OUTFILE)
 	python3 Mcp/tests/make_test_rom.py
 	$(OUTFILE) --rom Mcp/tests/red.nes --frames 300 --screenshot Mcp/tests/red.png
+	python3 Mcp/tests/mcp_smoke_test.py
 
 clean:
 	rm -rf obj bin

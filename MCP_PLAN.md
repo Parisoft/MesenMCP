@@ -376,7 +376,7 @@ surface is already sufficient).
 | Phase | Contents | Rough size |
 |---|---|---|
 | **P0 — headless proof ✅ (done)** | makefile split + `mcp` target; `main.cpp` that loads a ROM headless, runs 300 frames, dumps a PNG, exits. No MCP yet. Validates "no SDL/X11" claim. | done |
-| **P1 — MCP skeleton** | JSON-RPC loop, `initialize`/`tools/list`/`tools/call`; Tier 0 tools (load/pause/resume/run_frames/screenshot/get_status); CI job + smoke test | ~2–3 days |
+| **P1 — MCP skeleton ✅ (done)** | JSON-RPC loop, `initialize`/`tools/list`/`tools/call`; Tier 0 tools (load/pause/resume/run_frames/screenshot/get_status + unload/reset/set_speed); CI job + smoke test | done |
 | **P2 — inspection** | Tier 1–2 tools (memory, disasm, cpu/ppu state, breakpoints, step, trace, expressions, break notifications) | ~3–5 days |
 | **P3 — input & validation** | Tier 3–4 (controllers, savestates, Lua, CDL coverage, ROM tests, captures) | ~3–5 days |
 | **P4 — hardening** | determinism tests, docs, timeouts everywhere, optionally prune GUI / add HTTP transport | ~2–3 days |
@@ -410,6 +410,30 @@ Two headless-only gotchas discovered and fixed — **P1 must carry both into the
    emulation thread runs at `MaximumSpeed` can deadlock — the P1 debugger lifecycle must
    stop/pause emulation before releasing the debugger (the GUI always kept the debugger
    alive across ROM changes instead of re-initializing it mid-run).
+
+### P1 implementation notes
+
+- `Mcp/McpServer` — stdio JSON-RPC 2.0 loop (newline-delimited, MCP `2025-06-18` with
+  version negotiation for `2024-11-05`/`2025-03-26`), `initialize`/`ping`/`tools/list`/
+  `tools/call`, `-32700`/`-32600`/`-32601`/`-32602`/`-32002` error codes, rejects requests
+  before `initialize`, exits cleanly on stdin EOF. Tool failures are MCP `isError` content,
+  protocol failures are JSON-RPC errors.
+- `Mcp/EmuSession` — owns the `Emulator` + `HeadlessRenderer` for the process; implements
+  the P0 lessons (palette seeding, deterministic settings, speed flag after `LoadRom`).
+  Determinism is a `load_rom` argument (`deterministic`, default true; agents can opt into
+  random power-on RAM). Region/patch/speed are `load_rom` arguments.
+- `Mcp/ToolRegistry` — tool schemas + agent-facing descriptions (the descriptions are the
+  primary docs LLM clients see). 9 Tier-0 tools shipped.
+- **stdout discipline**: the core's stray stdout writes were rerouted to
+  `MessageManager` (`Debugger::Log`, `PNGHelper` error path); emu2413's debug printf is
+  behind `OPLL_DEBUG=0` (compiled out). Core logging to stdout is enabled only in the P0
+  CLI mode, never in MCP mode.
+- `Mcp/tests/mcp_smoke_test.py` — 39-check end-to-end MCP client (handshake, tool flows,
+  PNG pixel verification, error paths, graceful shutdown); wired into `make test` + CI.
+- Concurrency: single-threaded dispatch (one `tools/call` at a time); `run_frames` polls
+  with a timeout and returns partial results — an agent session can never deadlock on it.
+- Not carried into P1 (still open for P2): the `StopDebugger` deadlock above (no debugger
+  use in P1), notifications (breakpoint hits), memory/CPU inspection tools.
 
 
 ---

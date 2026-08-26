@@ -196,3 +196,4 @@ Mcp/tests/red.png
 
 # Checked-in test ROM ( *.nes is ignored above)
 !Mcp/tests/red.nes
+Mcp/tests/smoke-home/

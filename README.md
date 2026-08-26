@@ -16,12 +16,37 @@ and desktop input are simply not wired up.
 
 ## Status
 
-- **P0 (done)** - headless proof of concept CLI: load a ROM, run N frames at maximum
-  speed, dump a PNG screenshot, exit. Verified against public NES test ROMs
-  (blargg's full palette / vbl-nmi suites) with no `$DISPLAY` present.
-- **P1 (next)** - the actual MCP server over stdio (JSON-RPC 2.0): load/pause/resume,
-  run N frames, screenshot, memory read/write, CPU state, disassembly.
+- **P0 (done)** - headless proof of concept: load a ROM, run N frames at maximum
+  speed, dump a PNG screenshot, exit - validated against public NES test ROMs
+  with no `$DISPLAY` present.
+- **P1 (done)** - MCP server over stdio (newline-delimited JSON-RPC 2.0, MCP
+  `2025-06-18`) with Tier-0 tools: `load_rom` (regions, patches, deterministic
+  mode), `unload_rom`, `reset`, `pause`/`resume`, `set_speed` (`max`/`realtime`),
+  `run_frames` (frame-accurate advancement with timeout), `screenshot` (native
+  resolution PNG as MCP image content) and `get_status`. 39-check end-to-end
+  smoke test included (`make test`).
+- **P2 (next)** - inspection tools: memory read/write/search, CPU/PPU state,
+  disassembly, breakpoints/stepping/tracing, watch expressions.
   See [MCP_PLAN.md](MCP_PLAN.md) for the full roadmap.
+
+### Using with an MCP client
+
+```
+mesen-mcp            # stdio transport; one ROM per process
+```
+
+Client config example (Claude Desktop / any stdio MCP host):
+
+```json
+{
+  "mcpServers": {
+    "mesen": { "command": "/path/to/mesen-mcp" }
+  }
+}
+```
+
+Optional arguments: `--home <dir>` (emulator state + firmware files such as
+`gba_bios.bin`; default: per-process temp dir), `--verbose`.
 
 ## Building
 
