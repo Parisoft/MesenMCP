@@ -12,6 +12,8 @@ struct MemoryOperationInfo;
 class Breakpoint
 {
 public:
+	Breakpoint() = default;
+
 	template<uint8_t accessWidth = 1> bool Matches(MemoryOperationInfo& opInfo, AddressInfo& info);
 	bool HasBreakpointType(BreakpointType type);
 	string GetCondition();
@@ -22,6 +24,12 @@ public:
 	bool IsEnabled();
 	bool IsMarked();
 	bool IsAllowedForOpType(MemoryOperationType opType);
+
+	//Used by headless front-ends (MCP server) to build breakpoints programmatically -
+	//the fields are otherwise private (the GUI built the struct layout in managed code).
+	void Init(uint32_t id, CpuType cpuType, MemoryType memoryType, BreakpointTypeFlags type,
+		int32_t startAddr, int32_t endAddr, bool enabled, bool markEvent,
+		bool ignoreDummyOperations, string condition);
 
 private:
 	uint32_t _id;

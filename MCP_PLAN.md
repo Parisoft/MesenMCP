@@ -377,7 +377,7 @@ surface is already sufficient).
 |---|---|---|
 | **P0 — headless proof ✅ (done)** | makefile split + `mcp` target; `main.cpp` that loads a ROM headless, runs 300 frames, dumps a PNG, exits. No MCP yet. Validates "no SDL/X11" claim. | done |
 | **P1 — MCP skeleton ✅ (done)** | JSON-RPC loop, `initialize`/`tools/list`/`tools/call`; Tier 0 tools (load/pause/resume/run_frames/screenshot/get_status + unload/reset/set_speed); CI job + smoke test | done |
-| **P2 — inspection** | Tier 1–2 tools (memory, disasm, cpu/ppu state, breakpoints, step, trace, expressions, break notifications) | ~3–5 days |
+| **P2 — inspection ✅ (done)** | Tier 1–2 tools (memory, disasm, cpu/ppu state, breakpoints, step, trace, expressions, break notifications) | done |
 | **P3 — input & validation** | Tier 3–4 (controllers, savestates, Lua, CDL coverage, ROM tests, captures) | ~3–5 days |
 | **P4 — hardening** | determinism tests, docs, timeouts everywhere, optionally prune GUI / add HTTP transport | ~2–3 days |
 
@@ -434,6 +434,45 @@ Two headless-only gotchas discovered and fixed — **P1 must carry both into the
   with a timeout and returns partial results — an agent session can never deadlock on it.
 - Not carried into P1 (still open for P2): the `StopDebugger` deadlock above (no debugger
   use in P1), notifications (breakpoint hits), memory/CPU inspection tools.
+
+### P2 implementation notes
+
+- **Debugger lifecycle**: the debugger is initialized lazily by the first debug tool call
+  via `Emulator::InitDebugger()` (which locks the emulation like the GUI does) and then
+  **kept alive for the session** — `StopDebugger()` is never called (the P0 deadlock), and
+  the debugger survives ROM reloads on its own (`Emulator::InternalLoadRom` preserves it).
+- `Mcp/NotificationBridge` — `INotificationListener` registered on the emulator's
+  `NotificationManager`; copies `CodeBreak` events (`BreakEvent`) under a mutex with a
+  condition variable. `wait_for_breakpoint` blocks on it — polling beats push notifications
+  for most MCP clients.
+- **16 new tools** (25 total): `get_cpu_state`, `get_ppu_state` (NES/SNES/GBA serialization
+  incl. sub-CPUs), `get_memory_size`, `read_memory`, `write_memory`, `search_memory`
+  (value + hex-pattern, little-endian), `disassemble`, `evaluate_expression`,
+  `set_breakpoint`/`remove_breakpoint` (session keeps the list, pushes it in full via
+  `Debugger::SetBreakpoints` — its replace-all semantics), `step` (instruction/over/out/
+  cycle/scanline/frame), `continue`, `wait_for_breakpoint`, `get_callstack`, `trace`
+  (Mesen trace-format tags; default `[PC] [Disassembly]`), `get_debugger_status`.
+- Core additions: `Breakpoint::Init(...)` (fields were private; the old GUI built the
+  struct layout in C#) and the P1-era `NesDefaultVideoFilter::GetBuiltInPalette()`.
+- Memory types: resolved by friendly names (`cpu`, `work_ram`, `prg_rom`, `oam`,
+  `palette_ram`, ...) mapped through `magic_enum` over `MemoryType`; unavailable types are
+  excluded and the error message lists what exists for the loaded console. Note: NES
+  `work_ram` is Mesen's 8KB WRAM region; the 2KB internal RAM is `internal_ram`.
+- Step semantics: from a stopped state, `step` waits for a **new** break event
+  (`NotificationBridge` sequence), not `IsExecutionStopped()` (already true); `step out`
+  from a non-subroutine context runs to the next popped stack address (upstream behavior).
+- Expressions: `$xx` hex literals, `[addr]` memory reads, register names — documented in
+  the tool description (`[$2002] & $80` etc.).
+- **Debugger-instrumentation gotcha** (documented for future test-ROM authors): a tight
+  `BIT $2002 / BPL` vblank poll can phase-lock into Mesen's vblank-flag read-suppression
+  race under debugger instrumentation and never observe the flag. The bundled test ROM (v2)
+  uses a cycle-counted delay loop instead of `$2002` polls, keeps a zero-page signature for
+  memory tools, and calls a subroutine at `$C100` from its main loop as a
+  reliably-hitting breakpoint target.
+- `mcp_smoke_test.py` grew to 58 checks (P1 flow + full P2 debugger flow incl. breakpoint
+  hit at `$C100`, step-out to `$C05A`, memory roundtrip, pattern search, trace rows).
+- Validated against blargg's `full_palette.nes` (correct register/disasm/trace of its real
+  code paths).
 
 
 ---

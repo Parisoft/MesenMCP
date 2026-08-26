@@ -95,6 +95,12 @@ EmuSession::EmuSession(const std::string& homeFolder, bool verboseLog)
 	_emu->GetSettings()->SetFlag(EmulationFlags::TestMode);
 
 	_renderer.reset(new HeadlessRenderer(_emu.get()));
+
+	//Notification bridge: forwards breakpoint hits etc. from the emulation thread
+	//to tool calls (WaitForBreak). The NotificationManager holds a shared_ptr to
+	//the bridge, keeping it alive as long as the emulator exists.
+	_bridge = std::make_shared<NotificationBridge>();
+	_emu->GetNotificationManager()->RegisterNotificationListener(_bridge);
 }
 
 EmuSession::~EmuSession()

@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
-"""Generates a tiny NES test ROM for the MesenMCP headless smoke test.
+"""Generates a tiny NES test ROM for the MesenMCP smoke tests.
 
-The ROM (mapper 0 / NROM, 16KB PRG + 8KB CHR) runs the standard NES init
-sequence, clears nametable 0, sets the backdrop palette entry to color $16
-(bright red) and enables background rendering. CHR tile 0 is left as all
-zeros, so every pixel on screen uses palette index 0 -> the entire screen
-renders as a solid red rectangle.
+ROM v2 (mapper 0 / NROM, 16KB PRG + 8KB CHR). Designed to be robust for
+debugger tooling:
+
+- Uses a cycle-counted delay loop for the PPU warm-up instead of polling
+  $2002 (tight $2002 polls can phase-lock into Mesen's vblank-flag read
+  suppression race under debugger instrumentation).
+- Sets the backdrop palette to $16 (bright red) and enables background
+  rendering -> solid red screen for screenshot tests.
+- Writes a signature ($5A) to zero page $42-$45 for search/read tests.
+- Main loop calls a subroutine at $C100 which stores $5A at $0500 - a
+  reliably-hitting execute breakpoint target.
+- NMI/IRQ handlers are RTI; both interrupt sources are disabled.
 
 Run with no arguments: writes red.nes next to this script.
 Run with a path argument: writes the ROM to that path.
 
-All code bytes below are hand-assembled 6502 and loaded at $C000.
+All code bytes below are hand-assembled 6502, loaded at $C000.
 """
 import os
 import sys
@@ -27,11 +34,13 @@ def build_rom() -> bytes:
         0x8E, 0x00, 0x20,             # $C00B: STX $2000 (PPUCTRL = 0, NMI off)
         0x8E, 0x01, 0x20,             # $C00E: STX $2001 (PPUMASK = 0, rendering off)
 
-        # Wait for two vblanks (PPU warm-up)
-        0x2C, 0x02, 0x20,             # $C011: BIT $2002
-        0x10, 0xFB,                   # $C014: BPL $C011
-        0x2C, 0x02, 0x20,             # $C016: BIT $2002
-        0x10, 0xFB,                   # $C019: BPL $C016
+        # PPU warm-up delay: ~64k cycles (~2.2 frames), no $2002 reads
+        0xA2, 0x32,                   # $C011: LDX #$50 (outer)
+        0xA0, 0x00,                   # $C013: LDY #$00        <- outer loop
+        0x88,                         # $C015: DEY             <- inner loop
+        0xD0, 0xFD,                   # $C016: BNE $C015
+        0xCA,                         # $C018: DEX
+        0xD0, 0xF8,                   # $C019: BNE $C013
 
         # Palette: $3F00 = $16 (red, backdrop), $3F01 = $30 (white)
         0xA9, 0x3F,                   # $C01B: LDA #$3F
@@ -43,36 +52,56 @@ def build_rom() -> bytes:
         0xA9, 0x30,                   # $C02A: LDA #$30
         0x8D, 0x07, 0x20,             # $C02C: STA $2007
 
-        # Clear nametable 0 ($2000-$23FF, 1024 bytes incl. attribute table) to tile 0
-        0xA9, 0x20,                   # $C02F: LDA #$20
-        0x8D, 0x06, 0x20,             # $C031: STA $2006
-        0xA9, 0x00,                   # $C034: LDA #$00
-        0x8D, 0x06, 0x20,             # $C036: STA $2006
-        0xA2, 0x04,                   # $C039: LDX #$04 (4 x 256 bytes)
-        0xA0, 0x00,                   # $C03B: LDY #$00
-        0xA9, 0x00,                   # $C03D: LDA #$00
-        # clearloop ($C03F):
-        0x8D, 0x07, 0x20,             # $C03F: STA $2007
-        0xC8,                         # $C042: INY
-        0xD0, 0xFA,                   # $C043: BNE $C03F
-        0xCA,                         # $C045: DEX
-        0xD0, 0xF7,                   # $C046: BNE $C03F
+        # Zero-page signature $42-$45 = $5A (for memory tool tests)
+        0xA9, 0x5A,                   # $C02F: LDA #$5A
+        0x85, 0x42,                   # $C031: STA $42
+        0x85, 0x43,                   # $C033: STA $43
+        0x85, 0x44,                   # $C035: STA $44
+        0x85, 0x45,                   # $C037: STA $45
+
+        # Clear nametable 0 ($2000-$23FF, 1024 bytes) to tile 0
+        0xA9, 0x20,                   # $C039: LDA #$20
+        0x8D, 0x06, 0x20,             # $C03B: STA $2006
+        0xA9, 0x00,                   # $C03E: LDA #$00
+        0x8D, 0x06, 0x20,             # $C040: STA $2006
+        0xA2, 0x04,                   # $C043: LDX #$04 (4 x 256 bytes)
+        0xA0, 0x00,                   # $C045: LDY #$00
+        0xA9, 0x00,                   # $C047: LDA #$00
+        # clearloop ($C049):
+        0x8D, 0x07, 0x20,             # $C049: STA $2007
+        0xC8,                         # $C04C: INY
+        0xD0, 0xFA,                   # $C04D: BNE $C049
+        0xCA,                         # $C04F: DEX
+        0xD0, 0xF7,                   # $C050: BNE $C049
 
         # Enable background rendering
-        0xA9, 0x08,                   # $C048: LDA #$08
-        0x8D, 0x01, 0x20,             # $C04A: STA $2001
+        0xA9, 0x08,                   # $C052: LDA #$08
+        0x8D, 0x01, 0x20,             # $C054: STA $2001
 
-        0x40,                         # $C04D: RTI (NMI/IRQ handler - both are disabled)
-        0x4C, 0x4E, 0xC0,             # $C04E: JMP $C04E (halt)
+        # main ($C057): repeatedly call the $C100 subroutine
+        0x20, 0x00, 0xC1,             # $C057: JSR $C100
+        0x4C, 0x57, 0xC0,             # $C05A: JMP $C057
+    ])
+
+    subroutine = bytes([
+        0xA9, 0x5A,                   # $C100: LDA #$5A
+        0x8D, 0x00, 0x05,             # $C102: STA $0500
+        0x60,                         # $C105: RTS
+    ])
+
+    handlers = bytes([
+        0x40,                         # $C110: RTI (NMI/IRQ - both disabled)
     ])
 
     prg = bytearray(16 * 1024)        # 16KB PRG, mapped at $C000-$FFFF
     prg[0:len(code)] = code
+    prg[0x100:0x100 + len(subroutine)] = subroutine
+    prg[0x110:0x110 + len(handlers)] = handlers
 
     # Vectors at $FFFA (PRG offset $3FFA): NMI, RESET, IRQ
-    prg[0x3FFA:0x3FFC] = (0xC04D).to_bytes(2, "little")  # NMI -> RTI
+    prg[0x3FFA:0x3FFC] = (0xC110).to_bytes(2, "little")  # NMI -> RTI
     prg[0x3FFC:0x3FFE] = (0xC000).to_bytes(2, "little")  # RESET
-    prg[0x3FFE:0x4000] = (0xC04D).to_bytes(2, "little")  # IRQ -> RTI
+    prg[0x3FFE:0x4000] = (0xC110).to_bytes(2, "little")  # IRQ -> RTI
 
     chr_rom = bytearray(8 * 1024)     # 8KB CHR, all zeros (tile 0 = blank, palette idx 0)
 

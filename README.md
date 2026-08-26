@@ -23,10 +23,17 @@ and desktop input are simply not wired up.
   `2025-06-18`) with Tier-0 tools: `load_rom` (regions, patches, deterministic
   mode), `unload_rom`, `reset`, `pause`/`resume`, `set_speed` (`max`/`realtime`),
   `run_frames` (frame-accurate advancement with timeout), `screenshot` (native
-  resolution PNG as MCP image content) and `get_status`. 39-check end-to-end
-  smoke test included (`make test`).
-- **P2 (next)** - inspection tools: memory read/write/search, CPU/PPU state,
-  disassembly, breakpoints/stepping/tracing, watch expressions.
+  resolution PNG as MCP image content) and `get_status`.
+- **P2 (done)** - inspection & debugger tools: `get_cpu_state`/`get_ppu_state`
+  (NES/SNES/GBA), `read_memory`/`write_memory`/`search_memory`/`get_memory_size`
+  (friendly memory-type names, console-aware), `disassemble`,
+  `evaluate_expression` (Mesen expressions, `[addr]` memory reads),
+  `set_breakpoint`/`remove_breakpoint`/`wait_for_breakpoint` (execute/read/write,
+  conditions, ranges), `step` (instruction/over/out/cycle/scanline/frame),
+  `continue`, `get_callstack`, `trace` and `get_debugger_status` — 25 tools total,
+  58-check smoke test.
+- **P3 (next)** - input & validation: controller injection, savestates, Lua
+  scripting, CDL coverage, `.mntest` replay, GIF/AVI/WAV capture.
   See [MCP_PLAN.md](MCP_PLAN.md) for the full roadmap.
 
 ### Using with an MCP client

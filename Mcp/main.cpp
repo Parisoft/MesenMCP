@@ -11,12 +11,22 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <execinfo.h>
 #include <filesystem>
 #include <iostream>
 #include <string>
-
 #include <signal.h>
+
 #include <unistd.h>
+
+static void CrashHandler(int sig)
+{
+	void* frames[32];
+	int n = backtrace(frames, 32);
+	fprintf(stderr, "\n=== FATAL signal %d, backtrace (%d frames) ===\n", sig, n);
+	backtrace_symbols_fd(frames, n, 2);
+	_exit(128 + sig);
+}
 
 namespace fs = std::filesystem;
 
@@ -85,6 +95,8 @@ int main(int argc, char** argv)
 	//Never die on SIGPIPE (broken stdout when the client disconnects); the stdio
 	//loop notices the failed/EOF stream and exits cleanly.
 	::signal(SIGPIPE, SIG_IGN);
+	::signal(SIGSEGV, CrashHandler);
+	::signal(SIGABRT, CrashHandler);
 
 	std::string romPath;
 	std::string screenshotPath;

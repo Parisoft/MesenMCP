@@ -10,16 +10,37 @@
 //    deliberately non-deterministic (random RAM, RunAheadFrames=1).
 // 3. EmulationFlags set BEFORE LoadRom are reset while the ROM loads - speed
 //    flags must be applied after the load completes.
+// 4. The debugger is initialized lazily (on the first debug tool call) and is
+//    never torn down while the emulation runs - Emulator::StopDebugger() can
+//    deadlock at MaximumSpeed (P0 finding). The debugger survives ROM reloads
+//    on its own (Emulator::InternalLoadRom preserves it).
 #pragma once
 #include "Core/Shared/Emulator.h"
+#include "Core/Debugger/Debugger.h"
 #include "Mcp/HeadlessRenderer.h"
+#include "Mcp/NotificationBridge.h"
 
 #include <nlohmann/json.hpp>
 
 #include <memory>
 #include <string>
+#include <vector>
 
 using json = nlohmann::json;
+
+//User-facing breakpoint model (kept in the session; pushed to the core in full
+//on every change, matching Debugger::SetBreakpoints' replace-all semantics)
+struct BreakpointSpec
+{
+	uint32_t id = 0;
+	CpuType cpuType = CpuType::Nes;
+	MemoryType memoryType = MemoryType::NesMemory;
+	int32_t startAddress = 0;
+	int32_t endAddress = 0;
+	std::string access;      //"read", "write", "execute" (comma-combined)
+	std::string condition;   //Mesen debugger expression, optional
+	bool enabled = true;
+};
 
 class EmuSession
 {
@@ -32,11 +53,7 @@ public:
 	EmuSession(const EmuSession&) = delete;
 	EmuSession& operator=(const EmuSession&) = delete;
 
-	//--- Tool implementations (arguments come in as MCP tool arguments) ---
-	//Each returns a json object with either "result" (tool succeeded, payload
-	//for the caller) or "error" (human-readable message; the server layer
-	//turns that into an MCP isError response).
-
+	//--- Tier 0 tools ---
 	json LoadRom(const json& args);
 	json UnloadRom();
 	json Reset(const json& args);
@@ -47,17 +64,49 @@ public:
 	json Screenshot(const json& args);
 	json GetStatus();
 
+	//--- Tier 1/2 tools (debugger-backed) ---
+	json GetCpuState(const json& args);
+	json GetPpuState(const json& args);
+	json GetMemorySize(const json& args);
+	json ReadMemory(const json& args);
+	json WriteMemory(const json& args);
+	json SearchMemory(const json& args);
+	json Disassemble(const json& args);
+	json EvaluateExpression(const json& args);
+	json SetBreakpoint(const json& args);
+	json RemoveBreakpoint(const json& args);
+	json Step(const json& args);
+	json Continue();
+	json WaitForBreak(const json& args);
+	json GetCallstack(const json& args);
+	json Trace(const json& args);
+	json GetDebuggerStatus(const json& args);
+
 	bool IsRomLoaded();
 
 	HeadlessRenderer* GetRenderer() { return _renderer.get(); }
 	Emulator* GetEmulator() { return _emu.get(); }
 
-	static constexpr const char* Version = "0.1.0";
+	static constexpr const char* Version = "0.2.0";
 
 private:
 	void ApplyDeterministicSettings(bool deterministic);
 	void ApplySpeed(bool maximumSpeed);
 	json BuildStatus();
+
+	//Debugger helpers. EnsureDebugger() returns nullptr and fills `error` when
+	//the debugger cannot be started (no ROM, etc.). GetDebuggerOrNull() returns
+	//the Debugger* when already initialized (RAII via DebuggerRequest).
+	Debugger* EnsureDebugger(const json& args, std::string& error);
+	Debugger* GetDebuggerOrNull();
+	void PushBreakpoints(Debugger* dbg);
+
+	CpuType ResolveCpu(const json& args, std::string& error);
+	bool ResolveMemoryType(const std::string& name, MemoryType& type, std::string& error);
+	std::vector<std::pair<std::string, MemoryType>> GetAvailableMemoryTypes(Debugger* dbg);
+	json SerializeCpuState(Debugger* dbg, CpuType cpu);
+	json SerializePpuState(Debugger* dbg, CpuType cpu);
+	json BreakSummary(Debugger* dbg);
 
 	std::string _homeFolder;
 	bool _verboseLog;
@@ -65,4 +114,8 @@ private:
 
 	std::unique_ptr<Emulator> _emu;
 	std::unique_ptr<HeadlessRenderer> _renderer;
+	std::shared_ptr<NotificationBridge> _bridge;
+
+	std::vector<BreakpointSpec> _breakpoints;
+	uint32_t _nextBreakpointId = 1;
 };

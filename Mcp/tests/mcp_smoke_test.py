@@ -206,6 +206,73 @@ def main():
     ok("reload after unload", r["result"]["isError"] is False)
     ok("run after reload", c.call_tool("run_frames", {"frames": 10})["result"]["isError"] is False)
 
+    #--- P2: debugger tools ---
+    #CPU state: the ROM's main loop lives at $C057 (JSR $C100 / JMP $C057)
+    r = c.call_tool("get_cpu_state")
+    cs = json.loads(r["result"]["content"][0]["text"])
+    ok("cpu state sane", 0xC057 <= cs["pc"] <= 0xC05D or 0xC100 <= cs["pc"] <= 0xC105, f"pc={cs['pc']:#x}")
+
+    r = c.call_tool("disassemble", {"address": "$C000", "count": 2})
+    d = json.loads(r["result"]["content"][0]["text"])
+    ok("disassemble at reset", d["instructions"][0]["text"].startswith("SEI"), d["instructions"][0]["text"])
+
+    r = c.call_tool("read_memory", {"memory_type": "palette_ram", "address": 0, "length": 2})
+    ok("read palette ram", json.loads(r["result"]["content"][0]["text"])["hex"].upper().startswith("16 30"))
+
+    r = c.call_tool("write_memory", {"memory_type": "work_ram", "address": "$0300", "bytes": "DE AD BA BE"})
+    ok("write memory", r["result"]["isError"] is False)
+    r = c.call_tool("read_memory", {"memory_type": "work_ram", "address": 0x300, "length": 4})
+    ok("read back written bytes", json.loads(r["result"]["content"][0]["text"])["hex"].upper() == "DE AD BA BE")
+
+    r = c.call_tool("search_memory", {"memory_type": "prg_rom", "value": "A9 16"})
+    ok("search prg_rom pattern", 0x25 in json.loads(r["result"]["content"][0]["text"])["matches"])
+
+    r = c.call_tool("evaluate_expression", {"expression": "[$42] == $5A"})
+    ok("evaluate expression (memory read)", json.loads(r["result"]["content"][0]["text"])["value"] == 1)
+
+    r = c.call_tool("get_memory_size", {"memory_type": "internal_ram"})
+    ok("memory size (nes internal ram = 2KB)", json.loads(r["result"]["content"][0]["text"])["size"] == 2048)
+
+    r = c.call_tool("get_memory_size", {"memory_type": "not_a_type"})
+    ok("bad memory type -> isError + suggestions",
+       r["result"]["isError"] is True and "Available" in r["result"]["content"][0]["text"])
+
+    #Breakpoint on the constantly-called subroutine at $C100
+    r = c.call_tool("set_breakpoint", {"address": "$C100"})
+    ok("set breakpoint", r["result"]["isError"] is False)
+    r = c.call_tool("wait_for_breakpoint", {"timeout_ms": 5000})
+    wb = json.loads(r["result"]["content"][0]["text"])
+    ok("breakpoint hit at $C100", wb.get("stopped") and wb.get("cpu_state", {}).get("pc") == 0xC100, str(wb)[:100])
+
+    #Step out of the subroutine: RTS returns to $C05A
+    r = c.call_tool("step", {"type": "out", "timeout_ms": 3000})
+    st = json.loads(r["result"]["content"][0]["text"])
+    ok("step out to $C05A", st["stopped"] and st["cpu_state"]["pc"] == 0xC05A, f"pc={st['cpu_state'].get('pc', 0):#x}")
+
+    ok("remove all breakpoints", c.call_tool("remove_breakpoint", {"all": True})["result"]["isError"] is False)
+
+    #Step 3 instructions from $C05A (JMP/JSR/LDA)
+    r = c.call_tool("step", {"type": "instruction", "count": 3, "timeout_ms": 3000})
+    st = json.loads(r["result"]["content"][0]["text"])
+    ok("step 3 instructions", st["stopped"] and st["cpu_state"]["pc"] in (0xC102, 0xC100, 0xC105),
+       f"pc={st['cpu_state'].get('pc', 0):#x}")
+
+    r = c.call_tool("get_callstack")
+    ok("callstack", r["result"]["isError"] is False)
+
+    ok("continue", c.call_tool("continue")["result"]["isError"] is False)
+
+    r = c.call_tool("trace", {"run_frames": 1, "rows": 4})
+    tr = json.loads(r["result"]["content"][0]["text"])
+    ok("trace rows", tr.get("row_count", 0) >= 1 and "C0" in (tr.get("rows") or [""])[0], str(tr)[:100])
+
+    r = c.call_tool("get_ppu_state")
+    ok("ppu state", json.loads(r["result"]["content"][0]["text"]).get("frame_count", 0) > 0)
+
+    r = c.call_tool("get_debugger_status")
+    ds = json.loads(r["result"]["content"][0]["text"])
+    ok("debugger status", ds["debugger_started"] is True and "prg_rom" in ds.get("available_memory_types", []))
+
     #Protocol-level: malformed JSON line
     c.proc.stdin.write("{\"jsonrpc\": \"2.0\", \"id\": 999, \"method\":\n")
     c.proc.stdin.flush()
