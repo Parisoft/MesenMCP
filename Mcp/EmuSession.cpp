@@ -96,6 +96,9 @@ EmuSession::EmuSession(const std::string& homeFolder, bool verboseLog)
 
 	_renderer.reset(new HeadlessRenderer(_emu.get()));
 
+	//Virtual controller input (MCP set_controller tool) - same mechanism movies use
+	_input.reset(new VirtualInputProvider(_emu.get()));
+
 	//Notification bridge: forwards breakpoint hits etc. from the emulation thread
 	//to tool calls (WaitForBreak). The NotificationManager holds a shared_ptr to
 	//the bridge, keeping it alive as long as the emulator exists.
@@ -194,6 +197,25 @@ json EmuSession::LoadRom(const json& args)
 	//Settings must be applied before the console is instantiated during LoadRom
 	ApplyDeterministicSettings(deterministic);
 	_emu->GetSettings()->GetNesConfig().Region = region;
+
+	//Plug standard controllers into ports 1-2 - headless sessions start with NO
+	//controllers configured (ControllerConfig defaults to ControllerType::None,
+	//the GUI filled this in from its config file)
+	{
+		NesConfig& nes = _emu->GetSettings()->GetNesConfig();
+		if(nes.Port1.Type == ControllerType::None) { nes.Port1.Type = ControllerType::NesController; }
+		if(nes.Port2.Type == ControllerType::None) { nes.Port2.Type = ControllerType::NesController; }
+
+		SnesConfig& snes = _emu->GetSettings()->GetSnesConfig();
+		if(snes.Port1.Type == ControllerType::None) { snes.Port1.Type = ControllerType::SnesController; }
+		if(snes.Port2.Type == ControllerType::None) { snes.Port2.Type = ControllerType::SnesController; }
+
+		GameboyConfig& gb = _emu->GetSettings()->GetGameboyConfig();
+		if(gb.Controller.Type == ControllerType::None) { gb.Controller.Type = ControllerType::GameboyController; }
+
+		GbaConfig& gba = _emu->GetSettings()->GetGbaConfig();
+		if(gba.Controller.Type == ControllerType::None) { gba.Controller.Type = ControllerType::GbaController; }
+	}
 
 	bool ok;
 	if(patchPath.empty()) {

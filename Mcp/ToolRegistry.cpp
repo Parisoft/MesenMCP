@@ -441,6 +441,179 @@ ToolRegistry::ToolRegistry(EmuSession& session) : _session(session)
 		ObjectSchema({}, {}, {}),
 		[this](const json& args) { return _session.GetDebuggerStatus(args); }
 	});
+	//--- Tier 3/4: input & validation ---
+
+	Register({
+		"set_controller",
+		"Press buttons on a virtual controller. Buttons: up, down, left, right, start, "
+		"select, b, a (+ x, y, l, r on SNES; + l, r on GBA). Pass an empty list to release. "
+		"With hold_frames=N the buttons are held for exactly N frames (the tool advances "
+		"them for you); without it they stay held until the next set_controller call. Use "
+		"with run_frames + screenshot/read_memory to drive menus and gameplay.",
+		ObjectSchema(
+			{
+				{"port", "integer"},
+				{"buttons", "integer"},
+				{"hold_frames", "integer"},
+				{"timeout_ms", "integer"}
+			},
+			{ "buttons" },
+			{
+				{"port", "controller port, 1-4 (default 1)"},
+				{"buttons", "array of button names, or a string like 'start' or 'a,start'"},
+				{"hold_frames", "hold the buttons for this many frames (default: until changed)"}
+			}),
+		[this](const json& args) { return _session.SetController(args); }
+	});
+
+	Register({
+		"release_controller",
+		"Release all buttons on a virtual controller and stop overriding it.",
+		ObjectSchema({ {"port", "integer"} }, {}, { {"port", "controller port (default 1)"} }),
+		[this](const json& args) { return _session.ReleaseController(args); }
+	});
+
+	Register({
+		"save_state",
+		"Save the current emulation state to a file. Returns the path. Default location: "
+		 "the session home directory. Pair with load_state for A/B experiments without "
+		 "replaying inputs.",
+		ObjectSchema({ {"path", "string"} }, {}, { {"path", "absolute path for the .mss file (default: auto-numbered in the session home)"} }),
+		[this](const json& args) { return _session.SaveState(args); }
+	});
+
+	Register({
+		"load_state",
+		"Load a previously saved state file (restores CPU/RAM/PPU exactly). The currently "
+		"loaded ROM must match the state file.",
+		ObjectSchema({ {"path", "string"} }, { "path" }, { {"path", "path returned by save_state"} }),
+		[this](const json& args) { return _session.LoadState(args); }
+	});
+
+	Register({
+		"run_lua_script",
+		"Run a Lua script inside the emulator using Mesen's scripting API: emu.read/"
+		"emu.write (address, emu.memType.<type>) and emu.getMemorySize, callbacks via "
+		"emu.addEventCallback (frame/nmi/sprite0/etc.), emu.createSavestate/"
+		"loadSavestate, emu.getCpuState, HUD drawing (emu.drawString etc.), "
+		"emu.addCheat, and more. Print output is captured and "
+		"returned. By default the script is stopped after the optional run_frames window; "
+		"pass auto_stop=false to keep an event-callback script resident (stop later with "
+		"stop_lua_script). This is the power tool for arbitrary test logic - e.g. assert "
+		"RAM values every frame, automate input, or measure coverage.",
+		ObjectSchema(
+			{
+				{"code", "string"},
+				{"run_frames", "integer"},
+				{"auto_stop", "boolean"},
+				{"timeout_ms", "integer"},
+				{"cpu", "string"}
+			},
+			{ "code" },
+			{
+				{"code", "Lua source code"},
+				{"run_frames", "advance this many frames while the script runs (default 0)"},
+				{"auto_stop", "stop the script after running (default true)"}
+			}),
+		[this](const json& args) { return _session.RunLuaScript(args); }
+	});
+
+	Register({
+		"get_lua_script_log",
+		"Fetch the print output of a resident Lua script.",
+		ObjectSchema({ {"script_id", "integer"}, {"cpu", "string"} }, { "script_id" },
+			{ {"script_id", "id returned by run_lua_script"} }),
+		[this](const json& args) { return _session.GetLuaScriptLog(args); }
+	});
+
+	Register({
+		"stop_lua_script",
+		"Stop a resident Lua script (started with run_lua_script + auto_stop=false).",
+		ObjectSchema({ {"script_id", "integer"}, {"cpu", "string"} }, { "script_id" },
+			{ {"script_id", "id returned by run_lua_script"} }),
+		[this](const json& args) { return _session.StopLuaScript(args); }
+	});
+
+	Register({
+		"get_cdl_stats",
+		"Code/data logger statistics - how much of the cartridge program ROM has been "
+		"executed as code or accessed as data so far (a proxy for test coverage of the "
+		"ROM). Great for validation reports: 'the test run exercised 34% of PRG'. Also "
+		"reports the number of distinct functions entered.",
+		ObjectSchema({ {"memory_type", "string"}, {"cpu", "string"} }, {},
+			{ {"memory_type", "region to analyze (default: the console's prg_rom)"} }),
+		[this](const json& args) { return _session.GetCdlStats(args); }
+	});
+
+	Register({
+		"run_rom_test",
+		"Run a recorded ROM test (.mntest, Mesen's CI test format: a zip containing the "
+		"ROM, recorded inputs and per-frame screen hashes). The test runs in a separate "
+		"background emulator - your current session (ROM, breakpoints, memory edits) is "
+		"untouched. Returns passed/failed and the number of mismatched frames. Combine "
+		"with record_rom_test to build regression suites: record a known-good run once, "
+		"replay it after every change.",
+		ObjectSchema({ {"path", "string"} }, { "path" },
+			{ {"path", "path to the .mntest file"} }),
+		[this](const json& args) { return _session.RunRomTest(args); }
+	});
+
+	Register({
+		"record_rom_test",
+		"Start recording a .mntest ROM test from the CURRENT session: drive the game with "
+		"set_controller/run_frames; every frame's screen hash and all inputs are recorded. "
+		"Stop with stop_rom_test_record. Replay later with run_rom_test (also loadable in "
+		"the Mesen GUI).",
+		ObjectSchema(
+			{
+				{"path", "string"},
+				{"reset", "boolean"}
+			},
+			{ "path" },
+			{
+				{"path", "path of the .mntest file to create"},
+				{"reset", "reset the console when recording starts (default false)"}
+			}),
+		[this](const json& args) { return _session.RecordRomTest(args); }
+	});
+
+	Register({
+		"stop_rom_test_record",
+		"Finish and write out the .mntest file started by record_rom_test.",
+		ObjectSchema({}, {}, {}),
+		[this](const json&) { return _session.StopRomTestRecord(); }
+	});
+
+	Register({
+		"set_cheats",
+		"Apply Game Genie / Pro Action Replay cheat codes (the encoding family is detected "
+		"from the code format and console). Pass codes: [] to clear all cheats. Useful to "
+		"bypass level locks, get invincibility etc. when testing late-game behavior.",
+		ObjectSchema({ {"codes", "integer"} }, { "codes" },
+			{ {"codes", "array of cheat code strings, e.g. [\"SXIOPO\", \"81EFA2\"] (empty array clears)"} }),
+		[this](const json& args) { return _session.SetCheats(args); }
+	});
+
+	Register({
+		"capture_gif",
+		"Record N frames of gameplay as an animated GIF (native resolution). Returns the "
+		"file path (and optionally base64) - useful as a bug report attachment or to "
+		"visually verify a sequence of actions.",
+		ObjectSchema(
+			{
+				{"frames", "integer"},
+				{"path", "string"},
+				{"return_base64", "boolean"},
+				{"timeout_ms", "integer"}
+			},
+			{},
+			{
+				{"frames", "number of frames to record (default 60, max 3600)"},
+				{"path", "output .gif path (default: auto in the session home)"},
+				{"return_base64", "also return the GIF base64-encoded for small captures (<= 8MB)"}
+			}),
+		[this](const json& args) { return _session.CaptureGif(args); }
+	});
 }
 
 void ToolRegistry::Register(ToolDefinition tool)

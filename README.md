@@ -32,8 +32,14 @@ and desktop input are simply not wired up.
   conditions, ranges), `step` (instruction/over/out/cycle/scanline/frame),
   `continue`, `get_callstack`, `trace` and `get_debugger_status` — 25 tools total,
   58-check smoke test.
-- **P3 (next)** - input & validation: controller injection, savestates, Lua
-  scripting, CDL coverage, `.mntest` replay, GIF/AVI/WAV capture.
+- **P3 (done)** - input & validation: `set_controller`/`release_controller`
+  (virtual pads with hold-frames semantics), `save_state`/`load_state`,
+  `run_lua_script`/`get_lua_script_log`/`stop_lua_script` (Mesen's full Lua API,
+  output captured), `get_cdl_stats` (ROM code coverage), `record_rom_test`/
+  `stop_rom_test_record`/`run_rom_test` (record known-good runs, replay as
+  regression tests in an isolated background emulator), `set_cheats` (Game Genie/
+  PAR) and `capture_gif` - 38 tools total, 76-check smoke test.
+- **P4 (next)** - hardening: determinism tests, docs, optional HTTP transport.
   See [MCP_PLAN.md](MCP_PLAN.md) for the full roadmap.
 
 ### Using with an MCP client

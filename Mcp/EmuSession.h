@@ -16,9 +16,11 @@
 //    on its own (Emulator::InternalLoadRom preserves it).
 #pragma once
 #include "Core/Shared/Emulator.h"
+#include "Core/Shared/RecordedRomTest.h"
 #include "Core/Debugger/Debugger.h"
 #include "Mcp/HeadlessRenderer.h"
 #include "Mcp/NotificationBridge.h"
+#include "Mcp/VirtualInputProvider.h"
 
 #include <nlohmann/json.hpp>
 
@@ -82,12 +84,27 @@ public:
 	json Trace(const json& args);
 	json GetDebuggerStatus(const json& args);
 
+	//--- Tier 3/4 tools (input & validation) ---
+	json SetController(const json& args);
+	json ReleaseController(const json& args);
+	json SaveState(const json& args);
+	json LoadState(const json& args);
+	json RunLuaScript(const json& args);
+	json GetLuaScriptLog(const json& args);
+	json StopLuaScript(const json& args);
+	json GetCdlStats(const json& args);
+	json RunRomTest(const json& args);
+	json RecordRomTest(const json& args);
+	json StopRomTestRecord();
+	json SetCheats(const json& args);
+	json CaptureGif(const json& args);
+
 	bool IsRomLoaded();
 
 	HeadlessRenderer* GetRenderer() { return _renderer.get(); }
 	Emulator* GetEmulator() { return _emu.get(); }
 
-	static constexpr const char* Version = "0.2.0";
+	static constexpr const char* Version = "0.3.0";
 
 private:
 	void ApplyDeterministicSettings(bool deterministic);
@@ -115,7 +132,10 @@ private:
 	std::unique_ptr<Emulator> _emu;
 	std::unique_ptr<HeadlessRenderer> _renderer;
 	std::shared_ptr<NotificationBridge> _bridge;
+	std::unique_ptr<VirtualInputProvider> _input;
 
 	std::vector<BreakpointSpec> _breakpoints;
 	uint32_t _nextBreakpointId = 1;
+	std::shared_ptr<RecordedRomTest> _romTestRecorder;
+	uint32_t _saveStateCounter = 0;
 };

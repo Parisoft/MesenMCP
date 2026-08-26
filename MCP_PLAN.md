@@ -378,7 +378,7 @@ surface is already sufficient).
 | **P0 — headless proof ✅ (done)** | makefile split + `mcp` target; `main.cpp` that loads a ROM headless, runs 300 frames, dumps a PNG, exits. No MCP yet. Validates "no SDL/X11" claim. | done |
 | **P1 — MCP skeleton ✅ (done)** | JSON-RPC loop, `initialize`/`tools/list`/`tools/call`; Tier 0 tools (load/pause/resume/run_frames/screenshot/get_status + unload/reset/set_speed); CI job + smoke test | done |
 | **P2 — inspection ✅ (done)** | Tier 1–2 tools (memory, disasm, cpu/ppu state, breakpoints, step, trace, expressions, break notifications) | done |
-| **P3 — input & validation** | Tier 3–4 (controllers, savestates, Lua, CDL coverage, ROM tests, captures) | ~3–5 days |
+| **P3 — input & validation ✅ (done)** | Tier 3–4 (controllers, savestates, Lua, CDL coverage, ROM tests, captures) | done |
 | **P4 — hardening** | determinism tests, docs, timeouts everywhere, optionally prune GUI / add HTTP transport | ~2–3 days |
 
 ### P0 findings (implementation notes for P1+)
@@ -504,3 +504,37 @@ Two headless-only gotchas discovered and fixed — **P1 must carry both into the
 - Memory types: `Core/Shared/MemoryType.h` (§1.3 list).
 - Linux-only desktop deps to exclude: `Linux/LinuxMouseManager.cpp` (`XOpenDisplay`),
   `Linux/LinuxKeyManager.*`, `Linux/LinuxGameController.*`, `Linux/libevdev/`.
+
+### P3 implementation notes
+
+- `Mcp/VirtualInputProvider` — `IInputProvider` (the movie mechanism) injecting
+  per-port button masks; `set_controller` accepts button names or a list string,
+  with `hold_frames` semantics (held for exactly N frames, the tool advances them)
+  or hold-until-changed. **Controllers must be plugged in explicitly**: headless
+  sessions start with NO controllers (`ControllerConfig.Type` defaults to `None`;
+  the GUI filled this from its config) — `load_rom` now plugs standard pads into
+  ports 1-2 per console.
+- **Lua `print()` was writing to stdout** — the single source of every mysterious
+  "crash"/flaky stream corruption during P3 testing. `ScriptingContext` now
+  redirects Lua's `print` to the per-script log (via `lua_getextraspace`), so
+  script output lands in `run_lua_script`'s log where agents read it. Lua API
+  notes: memory access needs an explicit type — `emu.read(addr, emu.memType.nesMemory)`.
+- Memory semantics reminder baked into the tools: NES `internal_ram` = the 2KB
+  console RAM (mirrored across $0000-$1FFF on the CPU bus); `work_ram` = the
+  separate 8KB cartridge WRAM ($6000-$7FFF). Scripts writing CPU-bus addresses
+  are read back via `internal_ram`/`cpu`.
+- `run_rom_test` replays `.mntest` files in a **separate background emulator**
+  (Mesen's CI pattern) — the current session survives untouched.
+  `record_rom_test` + `stop_rom_test_record` record the current session (inputs +
+  per-frame hashes); replay of a deterministic session passes. This is the
+  regression-suite workflow: record known-good behavior, replay after changes.
+- Savestates via `SaveStateManager` file API; cheats via `CheatManager::SetCheats`
+  (code family guessed from format/console, address decoding is the core's job);
+  GIF capture via `VideoRenderer::StartRecording(GIF)` + run frames + stop.
+- CDL coverage accumulates only while the debugger exists — call any debug tool
+  before `get_cdl_stats` matters (the tool lazily initializes it, then coverage
+  grows from that point).
+- Stepping: a small settle delay + retry loop makes `Debugger::Step` reliable at
+  max speed; consecutive rapid steps within a tight loop still jitter by an
+  instruction (inherent to the break/release race) — single steps are exact.
+- 38 tools total; smoke test at 76 checks, stable across repeated runs.

@@ -980,10 +980,23 @@ json EmuSession::Step(const json& args)
 	}
 	uint32_t timeoutMs = args.value("timeout_ms", 5000);
 
+	//Give the emulation thread a moment to fully park when stepping from a
+	//stopped state - racing Debugger::Step against the park sequence can lose
+	//the step request entirely.
+	if(dbg->IsExecutionStopped()) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+	}
 	bool wasStopped = dbg->IsExecutionStopped();
 	uint64_t seq = _bridge->CurrentSequence();
-	dbg->Step(cpu, (int32_t)count, type, BreakSource::CpuStep);
-	bool stopped = WaitForExecutionStop(dbg, _bridge.get(), seq, wasStopped, timeoutMs);
+
+	//Debugger::Step arms a step request and releases the current break - at max
+	//speed this races occasionally and the request is lost (no new break event).
+	//Retry a couple of times before giving up.
+	bool stopped = false;
+	for(int attempt = 0; attempt < 3 && !stopped; attempt++) {
+		dbg->Step(cpu, (int32_t)count, type, BreakSource::CpuStep);
+		stopped = WaitForExecutionStop(dbg, _bridge.get(), seq, wasStopped, attempt == 0 ? timeoutMs : 1500);
+	}
 
 	json result;
 	result["stopped"] = stopped;
