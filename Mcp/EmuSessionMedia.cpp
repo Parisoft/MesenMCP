@@ -388,11 +388,16 @@ json EmuSession::GetSprites(const json& args)
 	std::vector<DebugSpriteInfo> sprites(previewInfo.SpriteCount);
 	constexpr uint32_t SpritePreviewSize = 128 * 128;
 	std::vector<uint32_t> spritePreviews((size_t)previewInfo.SpriteCount * SpritePreviewSize);
+	//The core paints the preview at the FULL buffer size from GetSpritePreviewInfo
+	//(NES: 256x256 incl. a spare 16-row band; SNES: 512x256 with an offscreen
+	//margin column area) - never the visible-only size, or the heap overflows.
 	std::vector<uint32_t> screenPreview;
-	if(previewInfo.VisibleWidth > 0 && previewInfo.VisibleHeight > 0) {
-		//The core paints the preview with spare rows beyond the visible height
-		//(e.g. NES fills 256x256 for a 256x240 preview) - allocate a wide margin
-		screenPreview.resize((size_t)previewInfo.VisibleWidth * (previewInfo.VisibleHeight + 256));
+	uint32_t previewWidth = previewInfo.VisibleWidth ? previewInfo.VisibleWidth : previewInfo.Width;
+	uint32_t previewHeight = previewInfo.VisibleHeight ? previewInfo.VisibleHeight : previewInfo.Height;
+	if(previewInfo.Width > 0 && previewInfo.Height > 0) {
+		previewWidth = previewInfo.Width;
+		previewHeight = previewInfo.Height;
+		screenPreview.resize((size_t)previewWidth * previewHeight);
 	}
 
 	tools->GetSpriteList(options, (BaseState&)buffers.ppuState, (BaseState&)buffers.ppuToolsState,
@@ -424,12 +429,15 @@ json EmuSession::GetSprites(const json& args)
 	}
 	result["sprites"] = list;
 
-	//Screen preview (sprites on a black background) as an image
+	//Screen preview (sprites on a background) as an image, at the core's full
+	//preview size (includes offscreen margins, like the GUI viewer)
 	if(!screenPreview.empty()) {
-		std::string base64 = EncodePngBase64(screenPreview, previewInfo.VisibleWidth, previewInfo.VisibleHeight);
+		std::string base64 = EncodePngBase64(screenPreview, previewWidth, previewHeight);
 		if(!base64.empty()) {
 			result["preview_image_base64"] = base64;
 		}
+		result["preview_width"] = previewWidth;
+		result["preview_height"] = previewHeight;
 	}
 	return json{ {"result", result} };
 }

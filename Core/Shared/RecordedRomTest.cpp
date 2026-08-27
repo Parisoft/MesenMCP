@@ -300,7 +300,16 @@ void RecordedRomTest::Save()
 	writer.AddFile(mmoFilename, "TestMovie.mmo");
 	std::remove(mmoFilename.c_str());
 
-	writer.AddFile(_emu->GetRomInfo().RomFile.GetFilePath(), "TestRom" + _emu->GetRomInfo().RomFile.GetFileExtension());
+	//Embed the ROM's loaded data (not its path) - for archive-loaded ROMs (zip/7z)
+	//GetFilePath() points at the archive itself, which would corrupt the test file
+	VirtualFile& romFile = _emu->GetRomInfo().RomFile;
+	vector<uint8_t> romData;
+	romFile.ReadFile(romData);
+	if(romData.empty()) {
+		writer.AddFile(romFile.GetFilePath(), "TestRom" + romFile.GetFileExtension());
+	} else {
+		writer.AddFile(romData, "TestRom" + romFile.GetFileExtension());
+	}
 
 	//Add a screenshot of the last frame to the zip file (with the sha1 hash in the filename)
 	stringstream screenshot;

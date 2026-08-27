@@ -238,6 +238,18 @@ Debugger* EmuSession::EnsureDebugger(const json& args, std::string& error)
 	if(GetDebuggerOrNull() == nullptr) {
 		//Lazily start the debugger (kept alive for the rest of the session; it
 		//survives ROM reloads - see EmuSession.h note 4)
+		//Also enable the per-console debugger instrumentation flags - the GUI set
+		//these when its debugger windows were open; some features (e.g. the GBA
+		//code/data logger feed) are gated behind them.
+		EmuSettings* settings = _emu->GetSettings();
+		settings->SetDebuggerFlag(DebuggerFlags::NesDebuggerEnabled, true);
+		settings->SetDebuggerFlag(DebuggerFlags::SnesDebuggerEnabled, true);
+		settings->SetDebuggerFlag(DebuggerFlags::GbDebuggerEnabled, true);
+		settings->SetDebuggerFlag(DebuggerFlags::GbaDebuggerEnabled, true);
+		settings->SetDebuggerFlag(DebuggerFlags::PceDebuggerEnabled, true);
+		settings->SetDebuggerFlag(DebuggerFlags::SmsDebuggerEnabled, true);
+		settings->SetDebuggerFlag(DebuggerFlags::WsDebuggerEnabled, true);
+
 		_emu->InitDebugger();
 
 		DebuggerRequest request = _emu->GetDebugger(false);
@@ -842,14 +854,18 @@ json EmuSession::SetBreakpoint(const json& args)
 			"access (read/write/execute), memory_type, condition");
 	}
 
-	bool ok = false;
-	int32_t address = args["address"].is_string() ? (int32_t)ParseHexOrDec(args["address"].get<std::string>(), ok)
+	bool ok = true;
+	int32_t address = args["address"].is_string()
+		? (int32_t)ParseHexOrDec(args["address"].get<std::string>(), ok)
 		: args["address"].get<int32_t>();
-	if(!ok && args["address"].is_string()) { return ErrorResult("invalid address"); }
-	int32_t endAddress = args.contains("end_address")
-		? (args["end_address"].is_string() ? (int32_t)ParseHexOrDec(args["end_address"].get<std::string>(), ok) : args["end_address"].get<int32_t>())
-		: address;
-	if(!ok) { return ErrorResult("invalid end_address"); }
+	if(!ok) { return ErrorResult("invalid address"); }
+	int32_t endAddress = address;
+	if(args.contains("end_address")) {
+		endAddress = args["end_address"].is_string()
+			? (int32_t)ParseHexOrDec(args["end_address"].get<std::string>(), ok)
+			: args["end_address"].get<int32_t>();
+		if(!ok) { return ErrorResult("invalid end_address"); }
+	}
 	if(endAddress < address) {
 		return ErrorResult("end_address must be >= address");
 	}

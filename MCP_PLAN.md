@@ -833,3 +833,38 @@ per-system ROMs are provided (WP2 pending on that input).
 5. WP4: which of a–e? (my recommendation: a + b now, c when a shared-server need
    materializes, d/e anytime)
 6. WP5: grant `workflows` permission to the app (or push the CI commit yourself)?
+
+### Cross-console e2e (post-WP4, with user-provided ROMs)
+
+`Mcp/tests/e2e_test.py` drives the **entire 45-tool surface** against real games
+per console - NES (*Abbaye des morts*), SNES (*Street Fighter II*), GBA
+(*SSFIIT Turbo Revival* with user-supplied `gba_bios.bin`): 157 checks, green.
+
+Fixes made during the e2e pass:
+
+- `load_rom` now accepts **archives directly**: a zip/7z is opened and the first
+  ROM entry is loaded via `VirtualFile(path, innerFile)` (the single-arg ctor
+  never looked inside archives).
+- `set_breakpoint` with **integer** addresses failed ("invalid end_address") -
+  the parse-ok flag was only set in the string branch. Fixed.
+- `pause` with the debugger active is asynchronous (it arms a stop at the next
+  instruction boundary) - the tool now waits up to 2s for the stop to land.
+- `record_rom_test` on an archive-loaded ROM embedded **the zip itself** as
+  `TestRom` (core wrote `RomFile.GetFilePath()`, which is the archive path).
+  `RecordedRomTest::Save` now embeds the ROM's loaded bytes (core fix).
+- Sprite screen-preview buffers must use the **full** `GetSpritePreviewInfo`
+  width/height (NES 256x256, SNES 512x256), never the visible-only size.
+
+Known issues (documented, worked around):
+
+1. **GBA reset deadlock (core)**: `Emulator::Reset`/`Stop` wedge when the GBA
+   CPU sits halted (BIOS IntrWait/STOP) with the debugger active - the emulation
+   thread never services the lock handshake. The `reset` tool runs a two-stage
+   watchdog (reset -> stop+reload -> clear error telling the agent to restart
+   the session). The e2e exercises the safe ordering (lifecycle before debugger
+   init). A proper fix belongs in the GBA halt loop's debugger servicing.
+2. **GBA CDL stays empty headless** (NES/SNES CDL work) - needs investigation;
+   `get_cdl_stats` on GBA reports zeros.
+3. Debugger-thread writes to NES APU registers produce no audible channel state
+   change - test audio via the game's own code (the bundled test ROM plays a
+   pulse tone; SF2's music is detected correctly).

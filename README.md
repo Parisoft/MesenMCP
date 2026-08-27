@@ -45,6 +45,10 @@ and desktop input are simply not wired up.
   clipping, `capture_wav`) and `trace_to_file` - 45 tools total, 84-check smoke
   test. Remaining P4 items are tracked in [MCP_PLAN.md](MCP_PLAN.md).
 
+**Cross-console e2e**: `python3 Mcp/tests/e2e_test.py` runs the full 45-tool
+surface against real ROMs per console (NES/SNES/GBA zips + `gba-bios.bin` in
+`Mcp/tests/`) - 157 checks. Requires the ROM/bios files to be present.
+
 ### Using with an MCP client
 
 ```

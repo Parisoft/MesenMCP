@@ -1,5 +1,6 @@
 //MesenMCP - emulator session layer
 #include "Mcp/EmuSession.h"
+#include "Core/Shared/DebuggerRequest.h"
 #include "Mcp/WavCaptureDevice.h"
 #include "Core/Shared/Audio/SoundMixer.h"
 
@@ -9,12 +10,14 @@
 #include "Core/Shared/RomInfo.h"
 #include "Core/Shared/Video/VideoDecoder.h"
 #include "Core/NES/NesDefaultVideoFilter.h"
+#include "Utilities/ArchiveReader.h"
 #include "Utilities/FolderUtilities.h"
 #include "Utilities/PNGHelper.h"
 #include "Utilities/Base64.h"
 #include "Utilities/HexUtilities.h"
 #include "Utilities/Timer.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -226,9 +229,42 @@ json EmuSession::LoadRom(const json& args)
 		if(gba.Controller.Type == ControllerType::None) { gba.Controller.Type = ControllerType::GbaController; }
 	}
 
+	//Archive support: if the path is a zip/7z, load the first ROM file inside it
+	string innerRom;
+	{
+		std::string romExt = fs::path(romPath).extension().string();
+		for(char& ch : romExt) { ch = (char)::tolower(ch); }
+		if(romExt == ".zip" || romExt == ".7z") {
+			unique_ptr<ArchiveReader> reader = ArchiveReader::GetReader(romPath);
+			if(reader) {
+				static const std::vector<std::string> romExts = {
+					".nes", ".fds", ".nsf", ".unif", ".sfc", ".smc", ".gb", ".gbc",
+					".gba", ".pce", ".sgx", ".sms", ".gg", ".sg", ".ws", ".wsc"
+				};
+				for(string& file : reader->GetFileList()) {
+					std::string ext = fs::path(file).extension().string();
+					for(char& ch : ext) { ch = (char)::tolower(ch); }
+					bool matched = false;
+					for(const std::string& valid : romExts) {
+						if(ext == valid) { matched = true; break; }
+					}
+					if(matched) {
+						innerRom = file;
+						break;
+					}
+				}
+			}
+			if(innerRom.empty()) {
+				return ErrorResult("archive contains no ROM file: " + romPath);
+			}
+		}
+	}
+
 	bool ok;
 	if(patchPath.empty()) {
-		ok = _emu->LoadRom((VirtualFile)romPath, VirtualFile());
+		ok = innerRom.empty()
+			? _emu->LoadRom((VirtualFile)romPath, VirtualFile())
+			: _emu->LoadRom(VirtualFile(romPath, innerRom), VirtualFile());
 	} else {
 		ok = _emu->LoadRom((VirtualFile)romPath, (VirtualFile)patchPath);
 	}
@@ -261,12 +297,61 @@ json EmuSession::Reset(const json& args)
 		return ErrorResult("no ROM is loaded");
 	}
 	bool powerCycle = args.value("mode", "reset") == "power_cycle";
-	if(powerCycle) {
-		_emu->PowerCycle();
-	} else {
-		_emu->Reset();
+
+	//Known core deadlock: resetting while the console CPU is halted (e.g. a GBA
+	//game idling in BIOS IntrWait) with the debugger active hangs Emulator::Lock
+	//forever. Run the reset with a watchdog and fall back to stop+reload (which
+	//is equivalent to a power cycle) when it stalls. The stuck reset thread
+	//completes on its own once the emulator thread stops.
+	std::atomic<bool> done = false;
+	std::thread watchdog([&]() {
+		if(powerCycle) {
+			_emu->PowerCycle();
+		} else {
+			_emu->Reset();
+		}
+		done = true;
+	});
+
+	Timer timer;
+	while(!done.load() && timer.GetElapsedMS() < 3000) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	}
-	return json{ {"result", powerCycle ? "power cycled" : "reset"} };
+
+	if(done.load()) {
+		watchdog.join();
+		return json{ {"result", powerCycle ? "power cycled" : "reset"} };
+	}
+
+	watchdog.detach();
+	string romPath = (string)_emu->GetRomInfo().RomFile;
+
+	//Fallback: stop + reload. The stuck emu thread usually unwedges once it is
+	//asked to stop - but guard this too, and report clearly if all is lost.
+	std::atomic<bool> fallbackDone = false;
+	std::thread fallback([&]() {
+		_emu->Stop(false);
+		if(_emu->LoadRom((VirtualFile)romPath, VirtualFile())) {
+			ApplySpeed(_maximumSpeed);
+		}
+		fallbackDone = true;
+	});
+	Timer fallbackTimer;
+	while(!fallbackDone.load() && fallbackTimer.GetElapsedMS() < 3000) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+	}
+	if(fallbackDone.load()) {
+		fallback.join();
+		if(!IsRomLoaded()) {
+			return ErrorResult("reset stalled (known CPU-halt + debugger deadlock) and the fallback reload failed");
+		}
+		return json{ {"result", "reset (fallback: stop + reload after the reset path stalled)"} };
+	}
+	fallback.detach();
+	return ErrorResult("reset stalled (known core deadlock: console CPU halted/stopped while the "
+		"debugger is active wedges the emulation thread). The session cannot recover from this - "
+		"restart the server (a fresh load_rom in a new process works fine). Avoid reset while a "
+		"GBA game idles in a halted state with the debugger running.");
 }
 
 json EmuSession::Pause()
@@ -274,7 +359,25 @@ json EmuSession::Pause()
 	if(!IsRomLoaded()) {
 		return ErrorResult("no ROM is loaded");
 	}
+	//With the debugger active, Pause() arms a break at the next instruction
+	//boundary instead of setting the flag synchronously - wait briefly for it.
+	uint64_t seq = _bridge->CurrentSequence();
+	bool wasStopped = false;
+	if(Debugger* dbg = _emu->GetDebugger(false).GetDebugger()) {
+		wasStopped = dbg->IsExecutionStopped();
+	}
 	_emu->Pause();
+	if(wasStopped) {
+		//Already stopped by the debugger - the pause request is a no-op
+		return BuildStatus();
+	}
+	Timer timer;
+	while(timer.GetElapsedMS() < 2000) {
+		if(_emu->IsPaused()) {
+			break;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	}
 	return BuildStatus();
 }
 
