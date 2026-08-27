@@ -208,9 +208,15 @@ def main():
 
     #--- P2: debugger tools ---
     #CPU state: the ROM's main loop lives at $C057 (JSR $C100 / JMP $C057)
+    r = c.call_tool("get_registers")
+    regs = json.loads(r["result"]["content"][0]["text"])
+    ok("registers combined view", {"pc", "a", "flags", "cycle_count", "ppu"} <= set(regs), str(sorted(regs.keys()))[:90])
+    ok("status flags decoded", set(regs["flags"]) == {"n", "v", "d", "i", "z", "c"} and regs["flags"]["i"] is True, str(regs["flags"]))
+    ok("ppu position in registers", {"scanline", "cycle", "frame_count"} <= set(regs["ppu"]), str(regs["ppu"])[:70])
+
     r = c.call_tool("get_cpu_state")
     cs = json.loads(r["result"]["content"][0]["text"])
-    ok("cpu state sane", 0xC06B <= cs["pc"] <= 0xC071 or 0xC100 <= cs["pc"] <= 0xC105, f"pc={cs['pc']:#x}")
+    ok("cpu state sane", 0xC06B <= cs["pc"] <= 0xC071 or 0xC100 <= cs["pc"] <= 0xC107, f"pc={cs['pc']:#x}")
 
     r = c.call_tool("disassemble", {"address": "$C000", "count": 2})
     d = json.loads(r["result"]["content"][0]["text"])

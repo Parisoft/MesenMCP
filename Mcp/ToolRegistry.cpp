@@ -182,9 +182,23 @@ ToolRegistry::ToolRegistry(EmuSession& session) : _session(session)
 	//--- Tier 1/2: inspection & debugging ---
 
 	Register({
+		"get_registers",
+		"One-shot register + timing view: CPU registers (A, X, Y, SP, PC...), the "
+		"status flags DECODED by name (NES 6502: n/v/d/i/z/c; SNES 65816: n/v/m/x/d/i/"
+		"z/c; GB: z/n/h/c; GBA: negative/zero/carry/overflow), the CPU cycle count, and "
+		"the PPU position (scanline, dot/cycle within the scanline, frame count). Use "
+		"this for 'where is the CPU and what are the flags right now'; use get_cpu_state/"
+		"get_ppu_state for the deeper per-block views.",
+		ObjectSchema({ {"cpu", "string"} }, {}, { {"cpu", "cpu to inspect (default: main cpu)"} }),
+		[this](const json& args) { return _session.GetRegisters(args); }
+	});
+
+	Register({
 		"get_cpu_state",
-		"Get the CPU registers of the emulated console (PC, A, X, Y, SP, flags, cycle count - "
-		"exact fields depend on the console: 6502 for NES, 65816 for SNES, ARM7TDMI for GBA). "
+		"Get the CPU registers of the emulated console (PC, A, X, Y, SP, PS) plus the "
+		"status flags decoded by name (n/v/d/i/z/c etc.) and the CPU cycle count - "
+		"exact fields depend on the console: 6502 for NES, 65816 for SNES (incl. K/DBR/D), "
+		"ARM7TDMI for GBA. "
 		"The optional 'cpu' argument selects a sub-processor on consoles that have several "
 		"(e.g. 'spc' on SNES); the default is the main CPU.",
 		ObjectSchema({ {"cpu", "string"} }, {}, { {"cpu", "cpu to inspect, e.g. 'nes' (default), 'spc', 'sa1', 'gba'"} }),
@@ -193,7 +207,8 @@ ToolRegistry::ToolRegistry(EmuSession& session) : _session(session)
 
 	Register({
 		"get_ppu_state",
-		"Get the picture-processing-unit state: current scanline/cycle, frame count, rendering "
+		"Get the picture-processing-unit state: current scanline and dot/cycle within "
+		"the scanline, frame count, rendering "
 		"flags (background/sprite enable), VRAM scroll address, vblank status (NES), BG mode "
 		"(SNES/GBA), etc. Useful to verify where in the frame the console is and whether "
 		"rendering is enabled.",

@@ -394,6 +394,10 @@ json EmuSession::SerializeCpuState(Debugger* dbg, CpuType cpu)
 			state["y"] = s.Y;
 			state["sp"] = s.SP;
 			state["ps"] = s.PS;
+			state["flags"] = json{
+				{"n", (s.PS & 0x80) != 0}, {"v", (s.PS & 0x40) != 0},
+				{"d", (s.PS & 0x08) != 0}, {"i", (s.PS & 0x04) != 0},
+				{"z", (s.PS & 0x02) != 0}, {"c", (s.PS & 0x01) != 0} };
 			state["cycle_count"] = s.CycleCount;
 			state["nmi_flag"] = s.NmiFlag;
 			state["irq_flag"] = s.IrqFlag;
@@ -412,6 +416,11 @@ json EmuSession::SerializeCpuState(Debugger* dbg, CpuType cpu)
 			state["d"] = s.D;
 			state["dbr"] = s.DBR;
 			state["ps"] = s.PS;
+			state["flags"] = json{
+				{"n", (s.PS & 0x80) != 0}, {"v", (s.PS & 0x40) != 0},
+				{"m", (s.PS & 0x20) != 0}, {"x", (s.PS & 0x10) != 0},
+				{"d", (s.PS & 0x08) != 0}, {"i", (s.PS & 0x04) != 0},
+				{"z", (s.PS & 0x02) != 0}, {"c", (s.PS & 0x01) != 0} };
 			state["emulation_mode"] = s.EmulationMode;
 			state["cycle_count"] = s.CycleCount;
 			break;
@@ -428,6 +437,10 @@ json EmuSession::SerializeCpuState(Debugger* dbg, CpuType cpu)
 			state["h"] = s.H;
 			state["l"] = s.L;
 			state["sp"] = s.SP;
+			state["flags"] = json{
+				{"z", (s.Flags & 0x80) != 0}, {"n", (s.Flags & 0x40) != 0},
+				{"h", (s.Flags & 0x20) != 0}, {"c", (s.Flags & 0x10) != 0} };
+			state["cycle_count"] = s.CycleCount;
 			break;
 		}
 		case CpuType::Gba: {
@@ -528,6 +541,26 @@ json EmuSession::SerializePpuState(Debugger* dbg, CpuType cpu)
 			break;
 	}
 	return state;
+}
+
+//--- Combined register/cycle view ---------------------------------------------
+
+json EmuSession::GetRegisters(const json& args)
+{
+	std::string error;
+	Debugger* dbg = EnsureDebugger(args, error);
+	if(!dbg) { return ErrorResult(error); }
+	CpuType cpu = ResolveCpu(args, error);
+	if(!error.empty()) { return ErrorResult(error); }
+
+	//One-shot view: CPU registers + decoded status flags + cycle count, plus
+	//the PPU position (scanline + dot within the scanline + frame count)
+	json result = SerializeCpuState(dbg, cpu);
+	result["ppu"] = SerializePpuState(dbg, cpu);
+	result["master_clock"] = _emu->GetMasterClock();
+	result["master_clock_rate"] = _emu->GetMasterClockRate();
+	result.erase("error");
+	return json{ {"result", result} };
 }
 
 //--- Tier 1: memory -----------------------------------------------------------

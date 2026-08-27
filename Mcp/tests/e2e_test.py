@@ -133,6 +133,9 @@ def battery(label, rom_path, console):
         else:
             ok(f"{label}: cpu ARM", "registers" in cpu and "thumb" in cpu)
 
+        regs = c.tool("get_registers")
+        ok(f"{label}: registers combined", {"pc", "flags", "ppu", "master_clock"} <= set(regs), str(sorted(regs.keys()))[:80])
+
         ppu = c.tool("get_ppu_state")
         ok(f"{label}: ppu state", "scanline" in ppu and ppu.get("frame_count", 0) > 0, str(ppu)[:80])
 

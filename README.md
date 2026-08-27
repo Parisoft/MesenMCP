@@ -91,6 +91,7 @@ Client config (Claude Desktop / any stdio MCP host):
 
 | Tool | Description |
 |---|---|
+| `get_registers` | **One-shot view:** registers + status flags decoded by name (NES `n/v/d/i/z/c`, SNES `n/v/m/x/d/i/z/c`, GB `z/n/h/c`, GBA N/Z/C/V) + CPU cycle count (GBA: master clock instead) + PPU scanline/dot/frame + master clock |
 | `get_cpu_state` | Registers per console: 6502 (NES), 65816 incl. K/DBR/D (SNES), ARM7TDMI incl. CPSR (GBA); sub-CPUs via `cpu` (e.g. `spc`) |
 | `get_ppu_state` | Scanline/cycle, frame count, rendering flags, scroll, vblank (NES), BG mode (SNES/GBA) |
 | `get_memory_size` | Size of a region; invalid names list what exists |

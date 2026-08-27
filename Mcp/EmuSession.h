@@ -69,6 +69,7 @@ public:
 	//--- Tier 1/2 tools (debugger-backed) ---
 	json GetCpuState(const json& args);
 	json GetPpuState(const json& args);
+	json GetRegisters(const json& args);
 	json GetMemorySize(const json& args);
 	json ReadMemory(const json& args);
 	json WriteMemory(const json& args);
