@@ -379,7 +379,7 @@ surface is already sufficient).
 | **P1 — MCP skeleton ✅ (done)** | JSON-RPC loop, `initialize`/`tools/list`/`tools/call`; Tier 0 tools (load/pause/resume/run_frames/screenshot/get_status + unload/reset/set_speed); CI job + smoke test | done |
 | **P2 — inspection ✅ (done)** | Tier 1–2 tools (memory, disasm, cpu/ppu state, breakpoints, step, trace, expressions, break notifications) | done |
 | **P3 — input & validation ✅ (done)** | Tier 3–4 (controllers, savestates, Lua, CDL coverage, ROM tests, captures) | done |
-| **P4 — hardening** | determinism tests, docs, timeouts everywhere, optionally prune GUI / add HTTP transport | ~2–3 days |
+| **P4 — hardening & completion** | see the detailed P4 proposal below (5 work packages, decision points marked) | TBD (scope-dependent) |
 
 ### P0 findings (implementation notes for P1+)
 
@@ -538,3 +538,144 @@ Two headless-only gotchas discovered and fixed — **P1 must carry both into the
   max speed; consecutive rapid steps within a tight loop still jitter by an
   instruction (inherent to the break/release race) — single steps are exact.
 - 38 tools total; smoke test at 76 checks, stable across repeated runs.
+
+---
+
+## 9. P4 proposal — hardening & completion (for review)
+
+P0–P3 shipped the full Tier 0–4 tool surface (38 tools), proven on NES and wired for
+SNES/GB/GBA at the core level. P4 turns "works on our tests" into "trustable by agents
+in production" and closes the loose ends accumulated on the way. It is split into work
+packages (WP) so scope can be trimmed per package. **Decision points are marked ⚠.**
+
+### WP1 — Determinism & correctness hardening (core value) — ~2–3 days
+
+- **Determinism harness**: identical scenario (load → save_state → scripted inputs →
+  N frames → screenshot + RAM dump) executed twice must produce byte-identical
+  screenshots (hash) and memory dumps. Wired into `make test` and required to pass
+  10 consecutive runs. With `deterministic:true` no variance is expected; host-side
+  timing (fps, wall-clock) is explicitly out of scope — console-internal timing is
+  exact regardless of host speed.
+- **Breakpoint lifecycle across ROM changes** ⚠: today `load_rom` keeps the session
+  breakpoint list and re-pushes it onto the new ROM, where the same addresses can mean
+  something completely different (or belong to a different console entirely).
+  Proposal: clear breakpoints + Lua scripts on ROM change by default, with an opt-in
+  `keep_debugger_state` argument on `load_rom`. (Small fix, needs a decision.)
+- **Step-accuracy** ⚠: current state = single steps are exact; consecutive rapid steps
+  within a tight loop can jitter by one instruction (the `Debugger::Step`
+  break/release race, mitigated at the tool layer with settle + retry). Options:
+  - a) accept + document (already documented; 0 days)
+  - b) core-side fix (step completion semaphore in `Debugger::Step`) — ~1–2 days,
+    touches the same path the GUI uses, needs regression care
+- **Stress suite**: 25× load/unload cycles; 200+ seeded random tool calls (fuzz);
+  interleaved debugger + input + Lua + capture + ROM swaps; malformed-argument
+  bombardment. Acceptance: no crash, no protocol corruption (stdout stays
+  JSON-only), clean shutdown, bounded memory (no leak growth across cycles).
+- **The never-called `StopDebugger` path**: the P0 deadlock is *avoided* (the
+  debugger is never torn down mid-run), not fixed. The stress suite proves the
+  avoidance holds under adversarial sequences. Optionally, a core-side fix could be
+  attempted, but it is not required for correctness of the server. ⚠ decide: leave
+  avoided (recommended) vs fix.
+
+### WP2 — Multi-console validation (delivering decision #2: NES/SNES/GBA) — ~2–3 days
+
+NES is fully proven; SNES/GBA are compiled in and their state serializers exist but
+have never been exercised end-to-end through the tools. WP2 adds per-console
+integration suites (public test ROMs, skipped gracefully when unavailable):
+
+- **SNES**: load/run/screenshot/CPU state (65816 incl. K/DBR/EmulationMode)/memory
+  regions (`snes_prg_rom`, `snes_video_ram`, ...)/12-button controller/savestates/
+  breakpoints on a known ROM (e.g. Peter Lemon's SNES demos or a PVSnesLib hello world).
+- **GB/GBC**: same with e.g. dmg-acid2 or blargg's cpu_instrs (public).
+- **GBA**: requires the user-supplied `gba_bios.bin` (16KB) — the suite auto-skips
+  when absent; the `load_rom` error message already names the file/path; docs get
+  the exact expectations (name, size, where it must live in the session home).
+- Fix whatever surfaces — the likely suspects are per-console state serialization
+  gaps (SnesPpuState/GbaPpuState field coverage) and memory-type name mapping
+  (`snes_video_ram` etc. through the friendly-name resolver).
+
+### WP3 — Agent experience & documentation — ~1–2 days
+
+- **`docs/MCP_TOOLS.md`**: generated from `tools/list` output (script, no drift) plus
+  a handwritten cookbook with the canonical agent workflows:
+  - "verify my init code ran" (breakpoint at NMI/entry, step, inspect)
+  - "find where the score lives" (search_memory + controlled input + diff)
+  - "regression-test a fix" (record_rom_test → change code → run_rom_test)
+  - "coverage report for the test run" (get_cdl_stats)
+  - "debug loop" (break → inspect → patch RAM → continue → savestate to keep state)
+  - per-console reference tables: memory types, button maps, the expression language
+    (`[$2002] & $80`, registers), Lua quick reference (`emu.read(addr, emu.memType....)`,
+    `addEventCallback`, `createSavestate`...).
+- **MCP tool annotations** (`readOnlyHint` / `destructiveHint` / `idempotentHint`)
+  and `outputSchema` for stable tools — cheap, improves client behavior.
+- **Tool-description audit pass** — the descriptions ARE the agent-facing docs;
+  verify each mentions its console specifics and failure modes.
+
+### WP4 — Optional features (à la carte, pick any) — 1–2 days each
+
+- **a) PPU/graphics inspection** (the one Tier-3 group never built; high value for
+  NES homebrew): `get_tilemap` (PNG), `get_tiles` (tileset page PNG), `get_palette`,
+  `get_sprites` (OAM table) — backed by `PpuTools::GetTileView` and friends which
+  are already core-complete. Answers "why is my background garbage" without the
+  agent having to decode nametables by hand through read_memory.
+- **b) Audio verification**: `WavCaptureDevice` (an `IAudioDevice` ring buffer) +
+  `get_audio_summary` (per-channel RMS/peak/clipping over the last N frames) +
+  `capture_wav`. Answers "is the music actually playing / not clipping" — the other
+  half of homebrew validation that screenshots can't see.
+- **c) Streamable HTTP transport** (token-authenticated) behind the existing
+  message-loop seam in `McpServer` — enables the shared "lab server" deployment
+  where multiple remote agent sessions reach one emulator host. stdio stays the
+  default; `--http host:port --token ...` opt-in.
+- **d) Labels & CDL persistence**: `set_label`/`clear_labels` (survive the session,
+  exported to Mesen label format), `save_cdl`/`load_cdl` — lets agents accumulate
+  symbol knowledge across runs.
+- **e) Trace-to-file** (`StartLogTraceToFile` wrapper) for long captures that would
+  blow the tool-response budget.
+
+### WP5 — Release engineering — ~1 day
+
+- **CI is still not running**: `.github/workflows/mcp.yml` exists locally but cannot
+  be pushed by the app token (missing `workflows` permission). ⚠ grant the
+  permission (or push commit `a09aeae` manually) — then CI covers build + no-SDL
+  gate + smoke tests on every push, as designed.
+- Release artifacts: tarball + SHA-256 via the workflow; `static-libstdc++`
+  (or fully static) build profile; `-O3` + LTO profile (currently `-O2`); `strip`;
+  version stamping from `git describe` (replaces the hardcoded `EmuSession::Version`).
+- **Nightly sanitizer runs**: ASan + TSan builds of the stress suite (the makefile
+  already supports `SANITIZER=`; threading is the highest-risk area).
+- **`docs/CORE_CHANGES.md`**: the exact, current diff surface vs upstream MesenCE —
+  `Breakpoint::Init`, `NesDefaultVideoFilter::GetBuiltInPalette`, Lua `print`
+  redirect, `Debugger::Log` → `MessageManager`, PNGHelper error routing — so future
+  upstream merges stay mechanical.
+- clang-format pass on `Mcp/` + the touched `Core/` files so the repo's format check
+  passes again.
+
+### Acceptance criteria (proposed)
+
+1. Determinism test green 10/10 consecutive runs
+2. Stress suite green under ASan **and** TSan, 25 load/unload cycles without growth
+3. SNES + GB suites green; GBA green when BIOS present (skips otherwise)
+4. `docs/MCP_TOOLS.md` generated + cookbook reviewed
+5. CI green on push (once the workflow lands) with release artifact attached
+
+### Effort summary
+
+| Package | Estimate |
+|---|---|
+| WP1 determinism & correctness | 2–3 d |
+| WP2 multi-console validation | 2–3 d |
+| WP3 docs & agent UX | 1–2 d |
+| WP4 à la carte (a–e) | 1–2 d each |
+| WP5 release engineering | 1 d |
+
+Minimal P4 = WP1 + WP3 + WP5 (~4–5 days). Full P4 = everything (~9–13 days).
+
+### Decision checklist (what I need from you)
+
+1. WP1: clear debugger state on ROM change by default? (recommended: yes)
+2. WP1: step-race — accept tool-layer mitigation (a) or core-side fix (b)?
+3. WP1: `StopDebugger` deadlock — leave avoided (recommended) or fix in core?
+4. WP2: confirm SNES/GB/GBA validation is in P4 (vs deferring GBA until BIOS story)
+5. WP4: which of a–e? (my recommendation: a + b now, c when a shared-server need
+   materializes, d/e anytime)
+6. WP5: grant `workflows` permission to the app (or push the CI commit yourself)?
