@@ -550,6 +550,32 @@ packages (WP) so scope can be trimmed per package. **Decision points are marked 
 
 ### WP1 — Determinism & correctness hardening (core value) — ~2–3 days
 
+*Execution detail:*
+
+- [ ] `Mcp/tests/determinism_test.py`: scenario = load ROM → `save_state` → scripted
+  inputs (`set_controller` sequence) → 300 frames → screenshot hash + full RAM dump
+  hash. Run the scenario **twice in one process** and **once in a second process**;
+  all three hashes must match. Add `make test-determinism` (base `make test` stays
+  fast) and run it 10× in CI. Files: new test + `makefile` + `mcp.yml`.
+- [ ] Breakpoint/script clearing on ROM change (`EmuSession::LoadRom`): clear
+  `_breakpoints`, `_nextBreakpointId`, and stop resident Lua scripts. Prereq: the
+  session must track resident script ids (`_residentScriptIds` — currently
+  `run_lua_script` with `auto_stop:false` returns the id but nobody remembers it;
+  small addition to `EmuSession`). Add `keep_debugger_state` argument to `load_rom`.
+- [ ] Step-accuracy regression test: from a breakpoint at `$C100`, 50 consecutive
+  single `step` calls must follow the exact expected PC chain
+  (`$C100→$C102→$C105→$C05A→$C057→$C100→…`). This pins whatever option (a)/(b) we
+  pick. Option (b) sketch, if chosen: make `StepRequest` completion signal an event
+  the tool layer waits on, instead of inferring completion from a new `CodeBreak`
+  notification. Risk: `Debugger.cpp` hot path shared with the (deleted) GUI —
+  mitigated by the 76-check suite + this new test.
+- [ ] `Mcp/tests/stress_test.py`: seeded RNG over the tool surface (200+ calls),
+  25 load/unload cycles, interleaved debugger+input+Lua+GIF+rom-test, malformed
+  args. Acceptance: exit 0, stdout stays parseable JSON throughout, RSS growth
+  across the 25 cycles < ~10% (sample `/proc/<pid>/status`).
+- [ ] `StopDebugger` invariant: leave avoided; add a comment block at
+  `EnsureDebugger` documenting *why* it must never be called mid-run.
+
 - **Determinism harness**: identical scenario (load → save_state → scripted inputs →
   N frames → screenshot + RAM dump) executed twice must produce byte-identical
   screenshots (hash) and memory dumps. Wired into `make test` and required to pass
@@ -579,6 +605,25 @@ packages (WP) so scope can be trimmed per package. **Decision points are marked 
 
 ### WP2 — Multi-console validation (delivering decision #2: NES/SNES/GBA) — ~2–3 days
 
+*Execution detail:*
+
+- [ ] `Mcp/tests/multi_console_test.py` — one parametrized suite, per-console ROM
+  discovery with explicit skip reasons:
+  - SNES: Peter Lemon's SNES demos (public) — load/run/screenshot non-black,
+    `get_cpu_state` (65816: K/DBR/D/EmulationMode), memory types
+    (`snes_prg_rom`, `snes_video_ram`, `snes_sprite_ram`, `snes_cg_ram`),
+    12-button `set_controller`, savestate roundtrip, exec breakpoint hit.
+  - GB/GBC: blargg `cpu_instrs` (public) — run to completion, read the result
+    registers from SRAM, `get_cpu_state` (A/B/C/D/E/H/L/SP), savestates.
+  - GBA: suite auto-skips unless `gba_bios.bin` (16 KB) is found; when present:
+    load/run/screenshot/ARM state (`registers`, `thumb`, `cpsr` flags), savestates,
+    breakpoint. Verify + document the exact firmware path the core expects
+    (`FirmwareHelper::AttemptLoadFirmware` → home folder layout) in README.
+- [ ] Expected fix surface: per-console field coverage in `SerializePpuState`
+  (SnesPpuState/GbaPpuState were written but never executed), memory-type name
+  mapping for SNES/GB/GBA regions in the friendly-name resolver, and GbaController
+  port lookup (GBA has a single controller port).
+
 NES is fully proven; SNES/GBA are compiled in and their state serializers exist but
 have never been exercised end-to-end through the tools. WP2 adds per-console
 integration suites (public test ROMs, skipped gracefully when unavailable):
@@ -596,6 +641,22 @@ integration suites (public test ROMs, skipped gracefully when unavailable):
 
 ### WP3 — Agent experience & documentation — ~1–2 days
 
+*Execution detail:*
+
+- [ ] `scripts/gen_tool_docs.py`: spawn `mesen-mcp`, capture `tools/list`, emit
+  `docs/MCP_TOOLS.md` (name/description/schema tables). Wired into `make docs`;
+  CI fails if the committed file is stale (drift guard).
+- [ ] Cookbook (handwritten section in the same file): the five canonical workflows
+  listed above, each as a concrete tool-call sequence that has actually been run.
+- [ ] Tool annotations in `ToolRegistry` (`readOnlyHint` for all `get_*`/`read_*`/
+  `screenshot`/`disassemble`/`evaluate_expression`; `destructiveHint` for
+  `write_memory`, `unload_rom`, `set_cheats`, `load_state`; `idempotentHint` where
+  true). Plus `outputSchema` for `get_status` and `get_debugger_status` (stable
+  shapes) — improves client-side validation and model behavior.
+- [ ] Description audit: every tool description cross-checked against actual
+  behavior + console specifics (incl. the `internal_ram` vs `work_ram` distinction
+  and the Lua `emu.memType` requirement).
+
 - **`docs/MCP_TOOLS.md`**: generated from `tools/list` output (script, no drift) plus
   a handwritten cookbook with the canonical agent workflows:
   - "verify my init code ran" (breakpoint at NMI/entry, step, inspect)
@@ -612,6 +673,30 @@ integration suites (public test ROMs, skipped gracefully when unavailable):
   verify each mentions its console specifics and failure modes.
 
 ### WP4 — Optional features (à la carte, pick any) — 1–2 days each
+
+*Execution detail (APIs already verified in core):*
+
+- [ ] a) PPU inspection: `get_tilemap`/`get_tiles`/`get_palette`/`get_sprites`
+  backed by `Debugger::GetPpuTools()->GetTileView(...)` (already core-complete,
+  was exported by the old InteropDLL), palette/OAM via `MemoryDumper` on
+  `palette_ram`/`sprite_ram` + decode. PNG output reuses the screenshot path.
+  Acceptance: on `red.nes`, `get_tilemap` returns a 256×240 PNG and
+  `get_sprites` returns an empty-but-valid OAM table.
+- [ ] b) Audio: `Mcp/WavCaptureDevice` implementing `IAudioDevice`, registered via
+  the sound mixer (same pattern as `HeadlessRenderer` for video). Keeps an
+  N-second stereo ring buffer; `get_audio_summary` computes per-channel
+  RMS/peak/clipping; `capture_wav` writes a file. Acceptance: on a music-playing
+  ROM, RMS > 0 and no clipping; on a silent ROM, RMS ≈ 0.
+- [ ] c) HTTP transport: `McpServer::Run` already isolates the message loop behind
+  stdin/stdout — add a `--http host:port --token` mode using `Utilities::Socket`
+  with the minimal MCP Streamable HTTP semantics (POST /mcp, JSON or SSE reply,
+  `Mcp-Session-Id`). Token via `Authorization: Bearer`. Acceptance: full 76-check
+  suite passes over HTTP against a local listener.
+- [ ] d) Labels: `LabelManager::SetLabel/RemoveLabel` (core-complete) +
+  `save_labels`/`load_labels` in Mesen's .mlb format so agents can persist symbol
+  knowledge across sessions. CDL: `SaveCdlFile/LoadCdlFile` wrappers.
+- [ ] e) `trace_to_file`: wrap `Debugger::StartLogTraceToFile/StopLogTraceToFile`;
+  returns the path; no row budget involved.
 
 - **a) PPU/graphics inspection** (the one Tier-3 group never built; high value for
   NES homebrew): `get_tilemap` (PNG), `get_tiles` (tileset page PNG), `get_palette`,
@@ -633,6 +718,27 @@ integration suites (public test ROMs, skipped gracefully when unavailable):
   blow the tool-response budget.
 
 ### WP5 — Release engineering — ~1 day
+
+*Execution detail:*
+
+- [ ] CI landing: needs the `workflows` permission for the app (repo Settings →
+  GitHub Apps / token scopes) **or** a manual `git push` of the local workflow
+  commit. Once pushed: build + `ldd` no-SDL gate + `make test` +
+  `make test-determinism` + stress suite on every push, artifact attached.
+- [ ] `make release`: `-O3` + LTO (`-flto=thin` for clang / `-flto=auto` for gcc —
+  flags already proven in upstream's makefile), `strip`, optional
+  `-static-libstdc++ -static-libgcc`; version stamping via
+  `-DMESEN_MCP_VERSION="$(git describe --tags --always)"` replacing the hardcoded
+  `EmuSession::Version`; tarball + `sha256sum` output.
+- [ ] Nightly (or per-push job flag): `SANITIZER=address` and `SANITIZER=thread`
+  builds running the stress suite.
+- [ ] `docs/CORE_CHANGES.md`: exact current diff surface vs upstream MesenCE:
+  `Breakpoint::Init`, `NesDefaultVideoFilter::GetBuiltInPalette`, Lua `print`
+  redirect (`ScriptingContext`), `Debugger::Log` → `MessageManager`,
+  `PNGHelper` error routing — one paragraph each with rationale, so upstream
+  merges stay mechanical.
+- [ ] clang-format (v20, repo config) pass over `Mcp/` and the touched `Core/`
+  files; restore the format check to green.
 
 - **CI is still not running**: `.github/workflows/mcp.yml` exists locally but cannot
   be pushed by the app token (missing `workflows` permission). ⚠ grant the
@@ -669,6 +775,20 @@ integration suites (public test ROMs, skipped gracefully when unavailable):
 | WP5 release engineering | 1 d |
 
 Minimal P4 = WP1 + WP3 + WP5 (~4–5 days). Full P4 = everything (~9–13 days).
+
+### Recommended sequencing (if you ask me to proceed)
+
+1. **WP5 CI landing first** (unblocks green-by-default for everything after)
+2. **WP1** minus the optional core-side step fix — determinism + stress + breakpoint
+   clearing harden everything that already exists
+3. **WP3 docs** — the tool surface is large enough that agent experience is now the
+   multiplier (and docs only get harder to write the more tools we add)
+4. **WP2 multi-console** — widens validated surface
+5. **WP4 a + b** (PPU + audio inspection) — the highest-value remaining tools
+6. WP4 c/d/e opportunistically
+
+Rationale: harden before widening, document before expanding, and land CI before
+anything else so every later change is gated automatically.
 
 ### Decision checklist (what I need from you)
 
