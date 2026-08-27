@@ -10,7 +10,9 @@ debugger tooling:
 - Sets the backdrop palette to $16 (bright red) and enables background
   rendering -> solid red screen for screenshot tests.
 - Writes a signature ($5A) to zero page $42-$45 for search/read tests.
-- Main loop calls a subroutine at $C100 which stores $5A at $0500 - a
+- Starts a pulse-1 tone (constant volume, halted length) so audio tools have a
+  nonzero signal to verify.
+- Main loop calls a subroutine at $C100 (main loop at $C06B) which stores $5A at $0500 - a
   reliably-hitting execute breakpoint target.
 - NMI/IRQ handlers are RTI; both interrupt sources are disabled.
 
@@ -78,9 +80,19 @@ def build_rom() -> bytes:
         0xA9, 0x08,                   # $C052: LDA #$08
         0x8D, 0x01, 0x20,             # $C054: STA $2001
 
-        # main ($C057): repeatedly call the $C100 subroutine
-        0x20, 0x00, 0xC1,             # $C057: JSR $C100
-        0x4C, 0x57, 0xC0,             # $C05A: JMP $C057
+        # Start a pulse-1 tone (real CPU register writes - audio fixtures)
+        0xA9, 0x0F,                   # $C057: LDA #$0F
+        0x8D, 0x15, 0x40,             # $C059: STA $4015 (enable pulse 1+2+tri+noise)
+        0xA9, 0xBF,                   # $C05C: LDA #$BF
+        0x8D, 0x00, 0x40,             # $C05E: STA $4000 (duty 2, halt, const vol 15)
+        0xA9, 0x20,                   # $C061: LDA #$20
+        0x8D, 0x02, 0x40,             # $C063: STA $4002 (timer low)
+        0xA9, 0x40,                   # $C066: LDA #$40
+        0x8D, 0x03, 0x40,             # $C068: STA $4003 (timer high + length load)
+
+        # main ($C06B): repeatedly call the $C100 subroutine
+        0x20, 0x00, 0xC1,             # $C06B: JSR $C100
+        0x4C, 0x6B, 0xC0,             # $C06E: JMP $C06B
     ])
 
     subroutine = bytes([

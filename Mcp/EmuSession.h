@@ -99,6 +99,15 @@ public:
 	json SetCheats(const json& args);
 	json CaptureGif(const json& args);
 
+	//--- P4 tools (PPU inspection, audio, trace files) ---
+	json GetPalette(const json& args);
+	json GetTilemap(const json& args);
+	json GetTiles(const json& args);
+	json GetSprites(const json& args);
+	json GetAudioSummary(const json& args);
+	json CaptureWav(const json& args);
+	json TraceToFile(const json& args);
+
 	bool IsRomLoaded();
 
 	HeadlessRenderer* GetRenderer() { return _renderer.get(); }
@@ -133,6 +142,7 @@ private:
 	std::unique_ptr<HeadlessRenderer> _renderer;
 	std::shared_ptr<NotificationBridge> _bridge;
 	std::unique_ptr<VirtualInputProvider> _input;
+	std::unique_ptr<class WavCaptureDevice> _audio;
 
 	std::vector<BreakpointSpec> _breakpoints;
 	uint32_t _nextBreakpointId = 1;

@@ -790,6 +790,40 @@ Minimal P4 = WP1 + WP3 + WP5 (~4–5 days). Full P4 = everything (~9–13 days).
 Rationale: harden before widening, document before expanding, and land CI before
 anything else so every later change is gated automatically.
 
+### WP4 status update (post-decision)
+
+Decisions taken: **WP4 a + b + e implemented**; CI dropped (repo has CI disabled
+- the workflow file was removed). Multi-console e2e validation deferred until
+per-system ROMs are provided (WP2 pending on that input).
+
+*WP4 a/b/e implementation notes:*
+
+- 7 new tools (45 total): `get_palette`, `get_tilemap`, `get_tiles`,
+  `get_sprites`, `get_audio_summary`, `capture_wav`, `trace_to_file`.
+  PPU tools wrap the core's `PpuTools` (the GUI viewer engine) with
+  layout-agnostic state buffers, so they are cross-console by construction.
+- **Core fix - APU channels were muted by default**: `NesConfig::ChannelVolumes`
+  (also `SmsConfig`/`CvConfig`) zero-initialized all channels; only the GUI's
+  config file supplied volume 100. Headless sessions produced perfect silence.
+  Defaults now 100 per channel (matching SnesConfig).
+- **Core gotcha - PPU tools state is large**: `GetPpuToolsState` memcpy's the
+  whole per-console struct (NesPpuToolsState embeds ExtModeConfig ≈ 8.3KB).
+  State buffers must be ≥16KB or the stack is smashed (found via ASan).
+- **Core gotcha - sprite screen preview is 256x256**: the NES preview fills one
+  extra 16-row band beyond the 256x240 visible area; buffers need margin.
+- Makefile fixes: `SANITIZER=` now applies to compilation too (previously only
+  the link), `-rdynamic` added so crash backtraces carry symbols. Note: header
+  edits do not trigger rebuilds (no header dependencies) - `rm obj/Mcp/*.o` when
+  in doubt.
+- Test ROM v3: plays a pulse-1 tone (halted length counter, constant volume) so
+  audio tools have a guaranteed nonzero signal; main loop moved to $C06B.
+- Debugger-thread writes to APU registers (Lua `emu.write` on $4015/$4003) do
+  not produce audible output (register writes land but the channel state does
+  not advance as expected from a non-emulation thread) - use ROM code or wait
+  for the game's sound engine when testing audio.
+- Smoke test at 84 checks incl. tilemap metadata, tileset geometry, 64-sprite
+  table + preview PNG, audible-but-not-clipping tone, WAV and trace files.
+
 ### Decision checklist (what I need from you)
 
 1. WP1: clear debugger state on ROM change by default? (recommended: yes)

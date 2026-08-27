@@ -614,6 +614,136 @@ ToolRegistry::ToolRegistry(EmuSession& session) : _session(session)
 			}),
 		[this](const json& args) { return _session.CaptureGif(args); }
 	});
+	//--- P4: PPU inspection, audio & trace files ---
+
+	Register({
+		"get_palette",
+		"Get the console's palette RAM as decoded RGB colors (plus raw values): NES "
+		"background + sprite palettes, SNES CGRAM, GBA palette RAM, etc. NES returns "
+		"4x4 bg + 4x4 sprite entries of the 2C02 palette; entry 0 is the backdrop "
+		"color shown when rendering is off.",
+		ObjectSchema({ {"cpu", "string"} }, {}, { {"cpu", "default: main cpu"} }),
+		[this](const json& args) { return _session.GetPalette(args); }
+	});
+
+	Register({
+		"get_tilemap",
+		"Render a background layer's tilemap to a PNG image (like the GUI tilemap "
+		"viewer). Shows the full nametable/map including parts scrolled off-screen, "
+		"with scroll position and layout metadata. NES: layer 0 = nametables. SNES/GBA/"
+		"PCE: layers 1-4 (BG modes apply). Answers 'why is my background garbage' "
+		"without decoding nametables by hand.",
+		ObjectSchema(
+			{
+				{"layer", "integer"},
+				{"save_path", "string"},
+				{"cpu", "string"}
+			},
+			{},
+			{
+				{"layer", "background layer number (NES: 0 = nametables; SNES/PCE/GBA: 0-3 = BG1-4, default 0)"},
+				{"save_path", "optional path to also write the PNG"}
+			}),
+		[this](const json& args) { return _session.GetTilemap(args); }
+	});
+
+	Register({
+		"get_tiles",
+		"Render the tileset (pattern tables / VRAM tiles) to a PNG image (like the GUI "
+		"tile viewer). NES: CHR ROM/RAM as 16-tiles-per-row grid, 'palette' selects "
+		"which of the 8 4-color palettes to apply (0-7, default 0). Use grayscale=true "
+		"to view raw bitplanes without palette coloring.",
+		ObjectSchema(
+			{
+				{"palette", "integer"},
+				{"width", "integer"},
+				{"start", "integer"},
+				{"grayscale", "boolean"},
+				{"save_path", "string"},
+				{"cpu", "string"}
+			},
+			{},
+			{
+				{"palette", "palette index for coloring, NES 0-7 (default 0)"},
+				{"width", "tiles per row (default 16, max 64)"},
+				{"start", "start byte offset in the tile data (default 0)"},
+				{"grayscale", "show bitplanes in grayscale instead of palette colors"},
+				{"save_path", "optional path to also write the PNG"}
+			}),
+		[this](const json& args) { return _session.GetTiles(args); }
+	});
+
+	Register({
+		"get_sprites",
+		"List the sprite table (OAM) with decoded positions/sizes/tiles/palettes and a "
+		"PNG preview of where sprites sit on screen. NES returns all 64 OAM entries "
+		"(visibility: visible/offscreen/clipped). Use it to check sprite flicker, "
+		"off-by-one placement or OAM corruption.",
+		ObjectSchema({ {"cpu", "string"} }, {}, { {"cpu", "default: main cpu"} }),
+		[this](const json& args) { return _session.GetSprites(args); }
+	});
+
+	Register({
+		"get_audio_summary",
+		"Audio verification: RMS level and peak per channel plus a clipping-sample "
+		"count, over a recent window (window_ms, default 1000ms) and since load. "
+		"Answers 'is the music actually playing' (rms ~0 = silence) and 'is it too "
+		"loud' (clipping samples > 0, peak near 1.0). Note: the APU must be running - "
+		"write $4015/$4000-$4013 or let the game's sound engine play.",
+		ObjectSchema({ {"window_ms", "integer"} }, {},
+			{ {"window_ms", "size of the recent-stats window (default 1000ms)"} }),
+		[this](const json& args) { return _session.GetAudioSummary(args); }
+	});
+
+	Register({
+		"capture_wav",
+		"Record N frames of emulated audio to a WAV file (the actual mixed output). "
+		"Returns the path (and optionally base64) - listen to what the game sounds "
+		"like, or analyze the file yourself.",
+		ObjectSchema(
+			{
+				{"frames", "integer"},
+				{"path", "string"},
+				{"return_base64", "boolean"},
+				{"timeout_ms", "integer"}
+			},
+			{},
+			{
+				{"frames", "number of frames to record (default 60, max 3600)"},
+				{"path", "output .wav path (default: auto in the session home)"},
+				{"return_base64", "also return the WAV base64-encoded for small captures (<= 8MB)"}
+			}),
+		[this](const json& args) { return _session.CaptureWav(args); }
+	});
+
+	Register({
+		"trace_to_file",
+		"Log the instruction trace to a file (no row-count limits - for long captures "
+		"that would exceed the in-memory 'trace' tool's budget). action='start' begins "
+		"logging to path (optional run_frames advances the game while logging; "
+		"auto_stop=true stops immediately after), action='stop' flushes and closes.",
+		ObjectSchema(
+			{
+				{"action", "string"},
+				{"path", "string"},
+				{"format", "string"},
+				{"condition", "string"},
+				{"run_frames", "integer"},
+				{"auto_stop", "boolean"},
+				{"use_labels", "boolean"},
+				{"cpu", "string"}
+			},
+			{},
+			{
+				{"action", "'start' (default) or 'stop'"},
+				{"path", "output file (default: auto in the session home)"},
+				{"format", "trace row format (default '[PC] [Disassembly]')"},
+				{"condition", "only trace rows matching this expression"},
+				{"run_frames", "advance this many frames while logging"},
+				{"auto_stop", "stop logging after run_frames completes (default false)"}
+			}),
+		[this](const json& args) { return _session.TraceToFile(args); }
+	});
 }
 
 void ToolRegistry::Register(ToolDefinition tool)

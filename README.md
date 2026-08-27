@@ -38,9 +38,12 @@ and desktop input are simply not wired up.
   output captured), `get_cdl_stats` (ROM code coverage), `record_rom_test`/
   `stop_rom_test_record`/`run_rom_test` (record known-good runs, replay as
   regression tests in an isolated background emulator), `set_cheats` (Game Genie/
-  PAR) and `capture_gif` - 38 tools total, 76-check smoke test.
-- **P4 (next)** - hardening: determinism tests, docs, optional HTTP transport.
-  See [MCP_PLAN.md](MCP_PLAN.md) for the full roadmap.
+  PAR) and `capture_gif`.
+- **P4 (partial: WP4 a/b/e done)** - PPU inspection (`get_palette`,
+  `get_tilemap`, `get_tiles`, `get_sprites` - cross-console, backed by the core's
+  PpuTools), audio verification (`get_audio_summary` with per-channel RMS/peak/
+  clipping, `capture_wav`) and `trace_to_file` - 45 tools total, 84-check smoke
+  test. Remaining P4 items are tracked in [MCP_PLAN.md](MCP_PLAN.md).
 
 ### Using with an MCP client
 

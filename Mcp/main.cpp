@@ -95,8 +95,10 @@ int main(int argc, char** argv)
 	//Never die on SIGPIPE (broken stdout when the client disconnects); the stdio
 	//loop notices the failed/EOF stream and exits cleanly.
 	::signal(SIGPIPE, SIG_IGN);
+#if !defined(__SANITIZE_ADDRESS__)
 	::signal(SIGSEGV, CrashHandler);
 	::signal(SIGABRT, CrashHandler);
+#endif
 
 	std::string romPath;
 	std::string screenshotPath;

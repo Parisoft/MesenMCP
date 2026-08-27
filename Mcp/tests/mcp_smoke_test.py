@@ -210,7 +210,7 @@ def main():
     #CPU state: the ROM's main loop lives at $C057 (JSR $C100 / JMP $C057)
     r = c.call_tool("get_cpu_state")
     cs = json.loads(r["result"]["content"][0]["text"])
-    ok("cpu state sane", 0xC057 <= cs["pc"] <= 0xC05D or 0xC100 <= cs["pc"] <= 0xC105, f"pc={cs['pc']:#x}")
+    ok("cpu state sane", 0xC06B <= cs["pc"] <= 0xC071 or 0xC100 <= cs["pc"] <= 0xC105, f"pc={cs['pc']:#x}")
 
     r = c.call_tool("disassemble", {"address": "$C000", "count": 2})
     d = json.loads(r["result"]["content"][0]["text"])
@@ -252,7 +252,7 @@ def main():
     r = c.call_tool("step", {"type": "out", "timeout_ms": 3000})
     st = json.loads(r["result"]["content"][0]["text"])
     pc = st.get("cpu_state", {}).get("pc", 0)
-    ok("step out stops in main loop", st.get("stopped") and (0xC057 <= pc <= 0xC05D or 0xC100 <= pc <= 0xC105),
+    ok("step out stops in main loop", st.get("stopped") and (0xC06B <= pc <= 0xC071 or 0xC100 <= pc <= 0xC105),
        f"pc={pc:#x}")
 
     #Step 3 instructions - consecutive rapid steps at max speed jitter within
@@ -281,6 +281,35 @@ def main():
     r = c.call_tool("get_debugger_status")
     ds = json.loads(r["result"]["content"][0]["text"])
     ok("debugger status", ds["debugger_started"] is True and "prg_rom" in ds.get("available_memory_types", []))
+
+    #--- P4: PPU inspection, audio & trace files ---
+    r = c.call_tool("get_palette")
+    pal = json.loads(r["result"]["content"][0]["text"])
+    ok("palette raw[0]=0x16 rgb=B53120", pal["background"][0]["raw"] == 0x16 and pal["background"][0]["rgb"] == "B53120")
+
+    r = c.call_tool("get_tilemap")
+    tm = json.loads([x for x in r["result"]["content"] if x["type"] == "text"][0]["text"])
+    tm_img = [x for x in r["result"]["content"] if x["type"] == "image"]
+    ok("tilemap png + meta", tm_img and tm["columns"] == 64 and tm["mirroring"] == "horizontal", str(tm)[:90])
+
+    r = c.call_tool("get_tiles")
+    tiles = json.loads([x for x in r["result"]["content"] if x["type"] == "text"][0]["text"])
+    ok("tiles 512 x 16/row", tiles.get("tile_count") == 512 and tiles.get("bytes_per_tile") == 16)
+
+    r = c.call_tool("get_sprites")
+    spr = json.loads(r["result"]["content"][0]["text"])
+    ok("sprites 64 + preview", spr.get("sprite_count") == 64 and "preview_image_base64" in spr)
+
+    #Audio: the ROM plays a pulse tone (v3) - rms must be clearly nonzero, no clipping
+    aud = json.loads(c.call_tool("get_audio_summary")["result"]["content"][0]["text"])
+    ok("audio tone audible", aud.get("capturing") and aud["window"]["rms_left"] > 0.005 and aud["window"]["peak_left"] > 0.05, str(aud.get("window")))
+    ok("audio not clipping", aud["window"]["clipping_samples"] == 0)
+
+    wav = json.loads(c.call_tool("capture_wav", {"frames": 20})["result"]["content"][0]["text"])
+    ok("capture_wav", wav.get("bytes", 0) > 10000)
+
+    tr = json.loads(c.call_tool("trace_to_file", {"run_frames": 5, "auto_stop": True})["result"]["content"][0]["text"])
+    ok("trace_to_file", tr.get("action") == "started+stopped" and tr.get("bytes", 0) > 100, str(tr)[:100])
 
     #--- P3: input & validation ---
     r = c.call_tool("set_controller", {"port": 1, "buttons": ["start", "a"], "hold_frames": 3})

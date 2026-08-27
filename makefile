@@ -31,9 +31,9 @@ endif
 #Note: Lua is included as "Lua/lua.hpp" - the repository root must be on the include path.
 INCLUDES := -I$(realpath ./) -I$(realpath ./Core) -I$(realpath ./Utilities) -I$(realpath ./Mcp)
 
-CXXFLAGS := -std=c++17 -Wall $(OPT_FLAG) $(INCLUDES)
-CFLAGS := -Wall $(OPT_FLAG) $(INCLUDES)
-LDFLAGS := $(FLAGS) -pthread
+CXXFLAGS := -std=c++17 -Wall $(OPT_FLAG) $(FLAGS) $(INCLUDES)
+CFLAGS := -Wall $(OPT_FLAG) $(FLAGS) $(INCLUDES)
+LDFLAGS := $(FLAGS) -pthread -rdynamic
 
 OUTFILE := bin/mesen-mcp
 

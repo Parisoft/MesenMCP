@@ -1,5 +1,7 @@
 //MesenMCP - emulator session layer
 #include "Mcp/EmuSession.h"
+#include "Mcp/WavCaptureDevice.h"
+#include "Core/Shared/Audio/SoundMixer.h"
 
 #include "Core/Shared/EmuSettings.h"
 #include "Core/Shared/MessageManager.h"
@@ -99,6 +101,11 @@ EmuSession::EmuSession(const std::string& homeFolder, bool verboseLog)
 	//Virtual controller input (MCP set_controller tool) - same mechanism movies use
 	_input.reset(new VirtualInputProvider(_emu.get()));
 
+	//Audio capture: keeps recent audio in a ring buffer (get_audio_summary) - the
+	//same registration the old SdlSoundManager used
+	_audio.reset(new WavCaptureDevice());
+	_emu->GetSoundMixer()->RegisterAudioDevice(_audio.get());
+
 	//Notification bridge: forwards breakpoint hits etc. from the emulation thread
 	//to tool calls (WaitForBreak). The NotificationManager holds a shared_ptr to
 	//the bridge, keeping it alive as long as the emulator exists.
@@ -110,6 +117,8 @@ EmuSession::~EmuSession()
 {
 	if(_emu) {
 		_renderer.reset();
+		_emu->GetSoundMixer()->RegisterAudioDevice(nullptr);
+		_audio.reset();
 		_emu->Stop(false);
 		_emu->Release();
 	}
