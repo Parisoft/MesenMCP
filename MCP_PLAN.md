@@ -868,3 +868,27 @@ Known issues (documented, worked around):
 3. Debugger-thread writes to NES APU registers produce no audible channel state
    change - test audio via the game's own code (the bundled test ROM plays a
    pulse tone; SF2's music is detected correctly).
+
+### ca65 .dbg source-level debugging (49 tools)
+
+- `Mcp/DbgData.h`: parser for cc65 `.dbg` files (same grammar as the old GUI
+  importer): `seg`/`file`/`line`/`span`/`sym`. Address math mirrors upstream:
+  code label PRG offset = `val - seg.start + seg.ooffs - headerSize` (16 for
+  iNES); RAM segments (no `ooffs` or `type=rw`) keep their CPU-bus address.
+- `load_dbg_file` resolves symbols through `Debugger::GetRelativeAddress`
+  (PRG -> CPU bus) inside a `DebugBreakHelper` scope — the mapper state it reads
+  races the emulation thread otherwise (found via a heisen-crash in `~DbgData`,
+  clean under ASan, fixed by parking the CPU). Labels are registered in
+  `LabelManager` (code on PRG-ROM, RAM on the CPU bus) so expressions and
+  breakpoint conditions resolve them; `disassemble` annotates rows with
+  file:line via the address->line map.
+- `set_breakpoint` gained three addressing modes: plain address (unchanged),
+  `label` (symbol, size-spanning; bare non-hex strings in `address` resolve as
+  labels), and `file`+`line`(+`end_line`) source breakpoints. Data-only lines
+  are rejected with a nearby-lines hint.
+- Fixture: `Mcp/tests/dbg-rom.nes/.dbg` built with real cc65 2.19 (`ca65 -g` +
+  `ld65 --dbgfile`), covering RAM labels (ZP/BSS), `.proc` symbols and line
+  spans. Smoke test covers the full flow (97 checks).
+- Note for cc65 users: `ca65 -g` embeds debug info in the .o; the final .dbg
+  must be requested from the linker (`--dbgfile`), and iNES CHR-bank count must
+  match the emitted file or Mesen rejects the ROM.

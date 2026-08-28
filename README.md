@@ -10,7 +10,7 @@ mesen-mcp --rom game.nes --frames 300 --screenshot out.png   # quick CLI check
 mesen-mcp                                                    # MCP server on stdio
 ```
 
-45 tools covering the full debug/validate loop: load & drive the game, inspect and
+49 tools covering the full debug/validate loop: load & drive the game, inspect and
 patch memory, break/step/trace the CPU, look at the PPU (tilemaps, sprites, palette),
 verify audio, script arbitrary assertions in Lua, and record/replay regression tests.
 
@@ -112,7 +112,7 @@ at $0000-$1FFF), `work_ram` (cart WRAM $6000+, when present), `prg_rom`, `chr_ro
 
 | Tool | Description |
 |---|---|
-| `set_breakpoint` | Execute/read/write (combinable), single address or range, optional expression `condition`; returns an id |
+| `set_breakpoint` | By **address**, by **label** (from a `.dbg` file - also accepted directly in `address`), or by **source line** (`file`+`line`); execute/read/write (combinable), ranges, optional expression `condition` |
 | `remove_breakpoint` | By `id`, or `all:true` |
 | `wait_for_breakpoint` | Block until a break (timeout_ms); returns which bp hit + CPU state |
 | `step` | `instruction` / `over` / `out` / `cycle` / `scanline` / `frame` |
@@ -121,6 +121,9 @@ at $0000-$1FFF), `work_ram` (cart WRAM $6000+, when present), `prg_rom`, `chr_ro
 | `trace` | In-memory instruction trace (format/condition filters, optional `run_frames`) |
 | `trace_to_file` | Unlimited-length trace logging to a file (start/stop/auto_stop) |
 | `get_debugger_status` | Debugger active/stopped, breakpoint list, available cpus & memory types |
+| `load_dbg_file` | Load a ca65/cc65 `.dbg` file: imports labels (usable in expressions/conditions/disassembly) + source-line mappings |
+| `find_labels` | Find symbols by name (substring or exact): CPU address, PRG offset, file:line, size, RAM/code |
+| `list_source_files` | Source files in the loaded `.dbg` with their code line counts |
 
 The debugger starts lazily on the first debug tool call and stays alive for the
 session (it survives ROM reloads).
@@ -152,6 +155,27 @@ session (it survives ROM reloads).
 | `capture_gif` | Gameplay clip as GIF |
 
 ---
+
+## Source-level debugging (ca65 / cc65)
+
+Build your ROM with debug info and MesenMCP can map source code to addresses:
+
+```
+ca65 -g -t nes main.s
+ld65 -C nes.cfg -o game.nes --dbgfile game.dbg main.o ...nes.lib
+# (with the cl65 driver: cl65 -t nes -g -Wl,--dbgfile,game.dbg ...)
+```
+
+Then in a session: `load_rom` → `load_dbg_file` → break on code, not hex:
+
+- `set_breakpoint {"label": "update_hud"}` — by symbol (spans the label's size)
+- `set_breakpoint {"file": "main.s", "line": 39}` — by source line (all code the line generated; `end_line` extends)
+- `find_labels {"query": "oam"}` — where is a symbol? RAM labels included (`shadow_oam @ $0200`)
+- Labels work in expressions/conditions (`evaluate_expression "update_hud"`, breakpoint `condition: "counter == 5"`)
+- `disassemble` rows are annotated with `source_file`/`source_line`
+
+A fixture ROM + .dbg built exactly this way lives in `Mcp/tests/dbg-rom.*` and is
+covered by the smoke test.
 
 ## Determinism
 

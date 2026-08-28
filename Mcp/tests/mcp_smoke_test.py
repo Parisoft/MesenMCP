@@ -21,7 +21,8 @@ import zlib
 
 BIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join("bin", "mesen-mcp")
 ROM = os.path.join(os.path.dirname(os.path.abspath(__file__)), "red.nes")
-HOME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "smoke-home")
+TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+HOME = os.path.join(TESTS_DIR, "smoke-home")
 
 passed = 0
 
@@ -369,6 +370,53 @@ def main():
     rt = json.loads(c.call_tool("run_rom_test", {"path": test_path})["result"]["content"][0]["text"])
     ok("rom test replay passes", rt.get("state") == "passed", str(rt)[:150])
     ok("session survives background test", json.loads(c.call_tool("get_status")["result"]["content"][0]["text"])["rom_loaded"] is True)
+
+    #--- ca65 .dbg symbol/source tools (fixture built with cc65) ---
+    DBG_ROM = os.path.join(TESTS_DIR, "dbg-rom.nes")
+    DBG_FILE = os.path.join(TESTS_DIR, "dbg-rom.dbg")
+    if os.path.isfile(DBG_ROM) and os.path.isfile(DBG_FILE):
+        r = c.call_tool("load_rom", {"path": DBG_ROM})
+        ok("dbg: load fixture rom", r["result"]["isError"] is False)
+        r = c.call_tool("load_dbg_file", {"path": DBG_FILE})
+        d = json.loads(r["result"]["content"][0]["text"])
+        ok("dbg: load_dbg_file", d.get("labels", 0) >= 4 and d.get("lines_with_code", 0) >= 10, str(d)[:90])
+
+        r = c.call_tool("find_labels", {"query": "shadow_oam"})
+        m = json.loads(r["result"]["content"][0]["text"])["matches"]
+        ok("dbg: ram label $0200", m and m[0]["ram"] is True and m[0]["address_hex"] == "$0200", str(m)[:90])
+
+        r = c.call_tool("set_breakpoint", {"label": "update_hud"})
+        bp = json.loads(r["result"]["content"][0]["text"])
+        ok("dbg: breakpoint by label", bp.get("source") == "update_hud" and bp.get("address", 0) > 0, str(bp)[:90])
+        r = c.call_tool("wait_for_breakpoint", {"timeout_ms": 5000})
+        wb = json.loads(r["result"]["content"][0]["text"])
+        hit_pc = wb.get("cpu_state", {}).get("pc", -1)
+        ok("dbg: label bp hit (within symbol range)", wb.get("stopped") and bp["address"] <= hit_pc <= bp.get("end_address", bp["address"]), str(wb)[:90])
+        c.call_tool("remove_breakpoint", {"all": True})
+        c.call_tool("continue")
+
+        r = c.call_tool("set_breakpoint", {"file": "main.s", "line": 39})
+        bpl = json.loads(r["result"]["content"][0]["text"])
+        ok("dbg: breakpoint by source line", "source" in bpl and bpl.get("address", 0) > 0, str(bpl)[:90])
+        r = c.call_tool("wait_for_breakpoint", {"timeout_ms": 5000})
+        ok("dbg: line bp hit", json.loads(r["result"]["content"][0]["text"]).get("stopped"))
+        c.call_tool("remove_breakpoint", {"all": True})
+        c.call_tool("continue")
+
+        r = c.call_tool("set_breakpoint", {"address": "nmi_handler"})
+        ok("dbg: address-as-label", json.loads(r["result"]["content"][0]["text"]).get("source") == "nmi_handler")
+        c.call_tool("remove_breakpoint", {"all": True})
+        c.call_tool("continue")
+
+        r = c.call_tool("disassemble", {"address": "$8000", "count": 2})
+        row = json.loads(r["result"]["content"][0]["text"])["instructions"][0]
+        ok("dbg: disassemble source annotation", str(row.get("source_file", "")).endswith("main.s") and row.get("source_line", 0) >= 1, str(row)[:90])
+
+        r = c.call_tool("evaluate_expression", {"expression": "update_hud"})
+        ev = json.loads(r["result"]["content"][0]["text"])
+        ok("dbg: expression resolves label", ev.get("value") == 0x8031, str(ev)[:80])
+    else:
+        print("  skip: .dbg fixture not present")
 
     #Protocol-level: malformed JSON line
     c.proc.stdin.write("{\"jsonrpc\": \"2.0\", \"id\": 999, \"method\":\n")

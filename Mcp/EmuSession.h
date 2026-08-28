@@ -20,6 +20,7 @@
 #include "Core/Debugger/Debugger.h"
 #include "Mcp/HeadlessRenderer.h"
 #include "Mcp/NotificationBridge.h"
+#include "Mcp/DbgData.h"
 #include "Mcp/VirtualInputProvider.h"
 
 #include <nlohmann/json.hpp>
@@ -106,6 +107,9 @@ public:
 	json GetTiles(const json& args);
 	json GetSprites(const json& args);
 	json GetAudioSummary(const json& args);
+	json LoadDbgFile(const json& args);
+	json FindLabels(const json& args);
+	json ListSourceFiles(const json& args);
 	json CaptureWav(const json& args);
 	json TraceToFile(const json& args);
 
@@ -129,6 +133,9 @@ private:
 	void PushBreakpoints(Debugger* dbg);
 
 	CpuType ResolveCpu(const json& args, std::string& error);
+	DbgData::Label* FindDbgLabel(const std::string& name);
+	bool ResolveDbgSourceRange(const json& args, int32_t& startAddress, int32_t& endAddress,
+		MemoryType& memType, std::string& description, std::string& error);
 	bool ResolveMemoryType(const std::string& name, MemoryType& type, std::string& error);
 	std::vector<std::pair<std::string, MemoryType>> GetAvailableMemoryTypes(Debugger* dbg);
 	json SerializeCpuState(Debugger* dbg, CpuType cpu);
@@ -142,6 +149,7 @@ private:
 	std::unique_ptr<Emulator> _emu;
 	std::unique_ptr<HeadlessRenderer> _renderer;
 	std::shared_ptr<NotificationBridge> _bridge;
+	std::unique_ptr<DbgData> _dbg;
 	std::unique_ptr<VirtualInputProvider> _input;
 	std::unique_ptr<class WavCaptureDevice> _audio;
 

@@ -805,11 +805,19 @@ json EmuSession::Disassemble(const json& args)
 		info.Initialize(address, 0, cpu, memType, dbg->GetMemoryDumper());
 		std::string text;
 		info.GetDisassembly(text, address, dbg->GetLabelManager(), _emu->GetSettings());
-		rows.push_back(json{
+		json row{
 			{"address", address},
 			{"address_hex", HexUtilities::ToHex32(address)},
 			{"text", text}
-		});
+		};
+		if(_dbg) {
+			auto src = _dbg->addrToLine.find(address);
+			if(src != _dbg->addrToLine.end()) {
+				row["source_file"] = _dbg->files[src->second.first].name;
+				row["source_line"] = src->second.second + 1; //1-based
+			}
+		}
+		rows.push_back(row);
 		address = (address + info.GetOpSize()) % memSize;
 	}
 
@@ -881,39 +889,113 @@ json EmuSession::SetBreakpoint(const json& args)
 	if(!dbg) { return ErrorResult(error); }
 	CpuType cpu = ResolveCpu(args, error);
 	if(!error.empty()) { return ErrorResult(error); }
-
-	if(!args.contains("address")) {
-		return ErrorResult("required argument: address (int or hex string); optional: end_address, "
-			"access (read/write/execute), memory_type, condition");
+	if(_breakpoints.size() >= 64) {
+		return ErrorResult("breakpoint limit reached (64); remove some first");
 	}
 
-	bool ok = true;
-	int32_t address = args["address"].is_string()
-		? (int32_t)ParseHexOrDec(args["address"].get<std::string>(), ok)
-		: args["address"].get<int32_t>();
-	if(!ok) { return ErrorResult("invalid address"); }
-	int32_t endAddress = address;
-	if(args.contains("end_address")) {
-		endAddress = args["end_address"].is_string()
-			? (int32_t)ParseHexOrDec(args["end_address"].get<std::string>(), ok)
-			: args["end_address"].get<int32_t>();
-		if(!ok) { return ErrorResult("invalid end_address"); }
+	MemoryType cpuMem = DebugUtilities::GetCpuMemoryType(cpu);
+	int32_t startAddress = 0;
+	int32_t endAddress = 0;
+	MemoryType memType = cpuMem;
+	std::string access = args.value("access", "execute");
+	std::string origin;   //how the address was resolved (source line / label)
+	bool haveAddress = false;
+
+	if(args.contains("line") || args.contains("file")) {
+		//--- Source-level breakpoint: file + line from a loaded .dbg file ---
+		std::string rangeError;
+		if(!ResolveDbgSourceRange(args, startAddress, endAddress, memType, origin, rangeError)) {
+			return ErrorResult(rangeError);
+		}
+		haveAddress = true;
+	} else {
+		std::string labelName;
+		if(args.contains("label")) {
+			if(!args["label"].is_string()) { return ErrorResult("label must be a string"); }
+			labelName = args["label"].get<std::string>();
+		} else if(args.contains("address") && args["address"].is_string()) {
+			//Hex-prefixed strings are always addresses; bare strings may be labels
+			std::string s = args["address"].get<std::string>();
+			if(!s.empty() && s[0] != '$' && s.substr(0, 2) != "0x" && s.substr(0, 2) != "0X"
+				&& FindDbgLabel(s) != nullptr) {
+				labelName = s;
+			}
+		}
+
+		if(!labelName.empty()) {
+			//--- Label breakpoint ---
+			DbgData::Label* label = FindDbgLabel(labelName);
+			if(!label) {
+				return ErrorResult("unknown label '" + labelName + "' (no .dbg file loaded, or "
+					"symbol not found - see find_labels)");
+			}
+			if(label->cpuAddress >= 0) {
+				startAddress = (int32_t)label->cpuAddress;
+				memType = cpuMem;
+			} else if(label->prgAddress >= 0) {
+				startAddress = (int32_t)label->prgAddress;
+				memType = MemoryType::NesPrgRom; //corrected below per console
+				switch(_emu->GetConsoleType()) {
+					case ConsoleType::Snes: memType = MemoryType::SnesPrgRom; break;
+					case ConsoleType::Gameboy: memType = MemoryType::GbPrgRom; break;
+					case ConsoleType::Gba: memType = MemoryType::GbaPrgRom; break;
+					case ConsoleType::PcEngine: memType = MemoryType::PcePrgRom; break;
+					case ConsoleType::Sms: memType = MemoryType::SmsPrgRom; break;
+					case ConsoleType::Ws: memType = MemoryType::WsPrgRom; break;
+					default: break;
+				}
+			} else {
+				return ErrorResult("label '" + labelName + "' has no resolvable address");
+			}
+			endAddress = startAddress;
+			if(args.contains("end_address")) {
+				bool endOk = true;
+				endAddress = args["end_address"].is_string()
+					? (int32_t)ParseHexOrDec(args["end_address"].get<std::string>(), endOk) : args["end_address"].get<int32_t>();
+				if(!endOk) { return ErrorResult("invalid end_address"); }
+			} else if(label->size > 1) {
+				endAddress = startAddress + (int32_t)label->size - 1;
+			}
+			origin = labelName;
+			haveAddress = true;
+		} else if(args.contains("address")) {
+			//--- Plain address (int or hex string) ---
+			bool ok = true;
+			startAddress = args["address"].is_string()
+				? (int32_t)ParseHexOrDec(args["address"].get<std::string>(), ok)
+				: args["address"].get<int32_t>();
+			if(!ok) { return ErrorResult("invalid address"); }
+			endAddress = startAddress;
+			if(args.contains("end_address")) {
+				endAddress = args["end_address"].is_string()
+					? (int32_t)ParseHexOrDec(args["end_address"].get<std::string>(), ok) : args["end_address"].get<int32_t>();
+				if(!ok) { return ErrorResult("invalid end_address"); }
+			}
+			haveAddress = true;
+			if(args.contains("memory_type")) {
+				if(!ResolveMemoryType(args["memory_type"].get<std::string>(), memType, error)) {
+					return ErrorResult(error);
+				}
+			}
+		}
 	}
-	if(endAddress < address) {
+
+	if(!haveAddress) {
+		return ErrorResult("required argument: address (int, hex string or label name), label, "
+			"or file+line for source-level breakpoints; optional: end_address, access "
+			"(read/write/execute), memory_type, condition");
+	}
+	if(endAddress < startAddress) {
 		return ErrorResult("end_address must be >= address");
 	}
 
-	std::string access = args.value("access", "execute");
+	//Validate + normalize access as a combination of read/write/execute tokens
 	for(char& c : access) { c = (char)::tolower(c); }
-
-	//Validate access as a combination of read/write/execute tokens
 	std::string normalized;
 	std::string token;
 	bool validAccess = true;
 	auto checkToken = [&]() {
-		if(token.empty()) {
-			return;
-		}
+		if(token.empty()) { return; }
 		if(token == "read" || token == "write" || token == "execute" || token == "exec") {
 			normalized += (token == "exec" ? std::string("execute") : token) + ",";
 		} else {
@@ -931,22 +1013,11 @@ json EmuSession::SetBreakpoint(const json& args)
 	}
 	access = normalized.substr(0, normalized.size() - 1);
 
-	MemoryType memoryType = DebugUtilities::GetCpuMemoryType(cpu);
-	if(args.contains("memory_type")) {
-		if(!ResolveMemoryType(args["memory_type"].get<std::string>(), memoryType, error)) {
-			return ErrorResult(error);
-		}
-	}
-
-	if(_breakpoints.size() >= 64) {
-		return ErrorResult("breakpoint limit reached (64); remove some first");
-	}
-
 	BreakpointSpec spec;
 	spec.id = _nextBreakpointId++;
 	spec.cpuType = cpu;
-	spec.memoryType = memoryType;
-	spec.startAddress = address;
+	spec.memoryType = memType;
+	spec.startAddress = startAddress;
 	spec.endAddress = endAddress;
 	spec.access = access;
 	spec.condition = args.value("condition", "");
@@ -955,14 +1026,17 @@ json EmuSession::SetBreakpoint(const json& args)
 
 	PushBreakpoints(dbg);
 
-	return json{ {"result", json{
-		{"id", spec.id},
-		{"address", spec.startAddress},
-		{"end_address", spec.endAddress},
-		{"access", spec.access},
-		{"condition", spec.condition},
-		{"total_breakpoints", _breakpoints.size()}
-	}} };
+	json out;
+	out["id"] = spec.id;
+	out["address"] = spec.startAddress;
+	out["end_address"] = spec.endAddress;
+	out["access"] = spec.access;
+	out["condition"] = spec.condition;
+	if(!origin.empty()) {
+		out["source"] = origin;
+	}
+	out["total_breakpoints"] = _breakpoints.size();
+	return json{ {"result", out} };
 }
 
 json EmuSession::RemoveBreakpoint(const json& args)
