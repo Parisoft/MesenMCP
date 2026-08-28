@@ -23,7 +23,7 @@ Requires a C++17 compiler (g++ or clang++) and python3 for the test tooling.
 
 ```
 make                # -> bin/mesen-mcp
-make test           # build + generate a test ROM + run the 84-check MCP smoke test
+make test           # build + generate a test ROM + run the 97-check MCP smoke test
 make clean
 ```
 
@@ -42,9 +42,9 @@ The binary runs with no `$DISPLAY` — that is the intended environment.
 
 ### Cross-console e2e (optional)
 
-`python3 Mcp/tests/e2e_test.py` runs the **entire 45-tool surface** against real
+`python3 Mcp/tests/e2e_test.py` runs the **entire 49-tool surface** against real
 ROMs per console — NES, SNES and GBA zips plus a `gba-bios.bin` placed in
-`Mcp/tests/` (157 checks). The test auto-creates the session home and installs the
+`Mcp/tests/` (160 checks). The test auto-creates the session home and installs the
 BIOS where the core expects it (`<home>/Firmware/gba_bios.bin`).
 
 ## Using with an MCP client
@@ -72,7 +72,7 @@ Client config (Claude Desktop / any stdio MCP host):
 
 ---
 
-## Tool reference (45 tools)
+## Tool reference (49 tools)
 
 ### Session & lifecycle
 
@@ -188,8 +188,8 @@ timing is exact regardless of host speed (`max` mode just removes the throttling
 
 | Command | What it does |
 |---|---|
-| `make test` | Generates `Mcp/tests/red.nes` (hand-assembled mapper-0 ROM with a signature in zero page and a pulse tone) + runs the 84-check MCP smoke test |
-| `python3 Mcp/tests/e2e_test.py` | 157-check cross-console e2e over all 45 tools (needs the ROM zips + BIOS in `Mcp/tests/`) |
+| `make test` | Generates `Mcp/tests/red.nes` (hand-assembled mapper-0 ROM with a signature in zero page and a pulse tone) + runs the 97-check MCP smoke test |
+| `python3 Mcp/tests/e2e_test.py` | 160-check cross-console e2e over all 49 tools (needs the ROM zips + BIOS in `Mcp/tests/`) |
 | `bin/mesen-mcp --rom ... --frames N --screenshot out.png` | P0 one-shot CLI: load, run, screenshot, exit |
 
 ## Known issues & limitations
@@ -216,7 +216,7 @@ timing is exact regardless of host speed (`max` mode just removes the throttling
 ## History & roadmap
 
 P0 headless proof → P1 MCP server (Tier-0) → P2 debugger/inspection → P3
-input/validation → P4 PPU+audio+trace tools → cross-console e2e (157 checks
+input/validation → P4 PPU+audio+trace tools → cross-console e2e (160 checks
 against real games). Remaining roadmap items (determinism/stress suites, docs
 generation, HTTP transport, labels) are tracked in [MCP_PLAN.md](MCP_PLAN.md).
 
