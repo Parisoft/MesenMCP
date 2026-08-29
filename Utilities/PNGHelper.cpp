@@ -1,6 +1,7 @@
 #include "pch.h"
 #include <sstream>
 #include "PNGHelper.h"
+#include "Shared/MessageManager.h"
 #include "miniz.h"
 
 #define SPNG_USE_MINIZ
@@ -33,7 +34,7 @@ bool PNGHelper::WritePNG(std::stringstream& stream, uint32_t* buffer, uint32_t x
 
 	void* pngData = tdefl_write_image_to_png_file_in_memory_ex(convertedData.data(), xSize, ySize, bitsPerPixel / 8, &pngSize, MZ_DEFAULT_LEVEL, MZ_FALSE);
 	if(!pngData) {
-		std::cout << "tdefl_write_image_to_png_file_in_memory_ex() failed!" << std::endl;
+		MessageManager::Log("[PNG] tdefl_write_image_to_png_file_in_memory_ex() failed!");
 		return false;
 	} else {
 		stream.write((char*)pngData, pngSize);

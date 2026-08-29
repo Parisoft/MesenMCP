@@ -3,6 +3,23 @@
 #include "Debugger/DebugTypes.h"
 #include "Debugger/DebugUtilities.h"
 
+void Breakpoint::Init(uint32_t id, CpuType cpuType, MemoryType memoryType, BreakpointTypeFlags type,
+	int32_t startAddr, int32_t endAddr, bool enabled, bool markEvent,
+	bool ignoreDummyOperations, string condition)
+{
+	_id = id;
+	_cpuType = cpuType;
+	_memoryType = memoryType;
+	_type = type;
+	_startAddr = startAddr;
+	_endAddr = endAddr;
+	_enabled = enabled;
+	_markEvent = markEvent;
+	_ignoreDummyOperations = ignoreDummyOperations;
+	memset(_condition, 0, sizeof(_condition));
+	strncpy(_condition, condition.c_str(), sizeof(_condition) - 1);
+}
+
 template<uint8_t accessWidth>
 bool Breakpoint::Matches(MemoryOperationInfo& operation, AddressInfo& info)
 {

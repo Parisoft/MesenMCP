@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Debugger/Debugger.h"
+#include "Shared/MessageManager.h"
 #include "Debugger/DebugTypes.h"
 #include "Debugger/DisassemblyInfo.h"
 #include "Debugger/MemoryDumper.h"
@@ -1083,7 +1084,8 @@ void Debugger::Log(string message)
 	}
 	_debuggerLog.push_back(message);
 
-	std::cout << message << std::endl;
+	//Logged through MessageManager (stdout would corrupt stdio transports like MCP)
+	MessageManager::Log(message);
 }
 
 string Debugger::GetLog()

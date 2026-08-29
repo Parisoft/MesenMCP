@@ -17,6 +17,27 @@
 
 ScriptingContext* ScriptingContext::_context = nullptr;
 
+//Print replacement: forwards Lua print() to the per-script log instead of stdout
+//(stdout belongs to the host process - e.g. an MCP stdio transport)
+int ScriptingContext::LuaPrintRedirect(lua_State* L)
+{
+	ScriptingContext* context = *((ScriptingContext**)lua_getextraspace(L));
+	string message;
+	int argc = lua_gettop(L);
+	for(int i = 1; i <= argc; i++) {
+		const char* str = luaL_tolstring(L, i, nullptr);
+		if(i > 1) {
+			message += "\t";
+		}
+		message += str ? str : "";
+		lua_pop(L, 1);
+	}
+	if(context) {
+		context->Log(message);
+	}
+	return 0;
+}
+
 ScriptingContext::ScriptingContext(Debugger* debugger)
 {
 	_debugger = debugger;
@@ -64,6 +85,13 @@ bool ScriptingContext::LoadScript(string scriptName, string path, string scriptC
 	EmuSettings* settings = debugger->GetEmulator()->GetSettings();
 	bool allowIoOsAccess = settings->GetDebugConfig().ScriptAllowIoOsAccess;
 	LuaOpenLibs(_lua, allowIoOsAccess);
+
+	//Redirect Lua's print() to the script log. The default print writes to stdout,
+	//which is unusable for headless front-ends with stdio transports (e.g. the MCP
+	//server) and invisible in the GUI's script log.
+	*((ScriptingContext**)lua_getextraspace(_lua)) = this;
+	lua_pushcfunction(_lua, LuaPrintRedirect);
+	lua_setglobal(_lua, "print");
 
 	//Prevent lua code from loading any files
 	SANDBOX_ALLOW_LOADFILE = allowIoOsAccess ? 1 : 0;

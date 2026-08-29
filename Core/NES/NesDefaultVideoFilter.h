@@ -28,6 +28,12 @@ public:
 	static void GenerateFullColorPalette(uint32_t paletteBuffer[512], PpuModel model);
 	static void GetFullPalette(uint32_t palette[512], NesConfig& nesCfg, PpuModel model);
 
+	//Fills the palette with Mesen's built-in default 2C02 colors (all 512 entries,
+	//including emphasis). Used by headless front-ends to seed NesConfig::UserPalette -
+	//the core expects the palette to be provided by the front-end (the GUI pushes it
+	//through its config file on startup).
+	static void GetBuiltInPalette(uint32_t palette[512]);
+
 	static uint32_t GetDefaultPixelBrightness(uint16_t colorIndex, PpuModel model);
 
 	void ApplyFilter(uint16_t* ppuOutputBuffer) override;

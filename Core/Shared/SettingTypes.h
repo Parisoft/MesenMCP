@@ -721,7 +721,7 @@ struct NesConfig
 	bool IsFullColorPalette = false;
 	uint32_t UserPalette[512] = {};
 
-	uint32_t ChannelVolumes[11] = {};
+	uint32_t ChannelVolumes[11] = { 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100 };
 	uint32_t EpsmVolume = 100;
 	uint32_t ChannelPanning[11] = {};
 
@@ -757,7 +757,7 @@ struct SmsConfig
 	bool DisableSprites = false;
 	bool DisableBackground = false;
 
-	uint32_t ChannelVolumes[4] = {};
+	uint32_t ChannelVolumes[4] = { 100, 100, 100, 100 };
 	uint32_t FmAudioVolume = 100;
 	bool EnableFmAudio = true;
 
@@ -778,7 +778,7 @@ struct CvConfig
 	bool DisableSprites = false;
 	bool DisableBackground = false;
 
-	uint32_t ChannelVolumes[4] = {};
+	uint32_t ChannelVolumes[4] = { 100, 100, 100, 100 };
 };
 
 enum class WsModel : uint8_t
