@@ -70,6 +70,7 @@ test: $(OUTFILE)
 	python3 Mcp/tests/make_test_rom.py
 	$(OUTFILE) --rom Mcp/tests/red.nes --frames 300 --screenshot Mcp/tests/red.png
 	python3 Mcp/tests/mcp_smoke_test.py
+	python3 Mcp/tests/input_test.py
 
 clean:
 	rm -rf obj bin

@@ -15,6 +15,7 @@
 #include "Utilities/FolderUtilities.h"
 #include "Utilities/HexUtilities.h"
 #include "Utilities/Timer.h"
+#include "magic_enum.hpp"
 
 #include <ctime>
 #include <filesystem>
@@ -39,6 +40,23 @@ namespace
 			case RomTestState::Failed: return "failed";
 			default: return "unknown";
 		}
+	}
+
+	//snake_case of an enum name, e.g. "NesController" -> "nes_controller"
+	std::string EnumToSnake(const char* name)
+	{
+		std::string out;
+		for(const char* p = name; *p; p++) {
+			if(*p >= 'A' && *p <= 'Z') {
+				if(!out.empty() && out.back() != '_') {
+					out += '_';
+				}
+				out += (char)(*p - 'A' + 'a');
+			} else {
+				out += *p;
+			}
+		}
+		return out;
 	}
 
 	CheatType GuessCheatType(const std::string& code, ConsoleType console)
@@ -114,6 +132,16 @@ json EmuSession::SetController(const json& args)
 			return run;
 		}
 		result["frames_run"] = run["result"]["frames_run"];
+
+		//The countdown ticks on the console's input polls - one per frame, at
+		//the vblank scanline - so the auto-release can land just after the last
+		//frame run_frames waited for. Wait for it, so a fixed-length press never
+		//returns with the button still down.
+		Timer releaseTimer;
+		while(_input->GetPortMask(port) != 0 && releaseTimer.GetElapsedMS() < 2000) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+		result["released"] = _input->GetPortMask(port) == 0;
 	}
 	return json{ {"result", result} };
 }
@@ -123,6 +151,61 @@ json EmuSession::ReleaseController(const json& args)
 	uint32_t port = args.value("port", 1);
 	_input->ReleasePort(port);
 	return json{ {"result", json{ {"port", port}, {"released", true} }} };
+}
+
+json EmuSession::GetControllerState(const json& args)
+{
+	if(!IsRomLoaded()) {
+		return ErrorResult("no ROM is loaded");
+	}
+
+	uint32_t port = args.value("port", 1);
+	if(port < 1 || port > VirtualInputProvider::MaxPort) {
+		return ErrorResult("port must be 1 to " + std::to_string(VirtualInputProvider::MaxPort));
+	}
+
+	//Attach before reporting, so this reflects what the game will actually poll
+	_input->SyncRegistration();
+
+	json result;
+	result["port"] = port;
+	result["provider_attached"] = _input->IsRegistered();
+	result["overriding"] = _input->IsPortActive(port);
+	result["buttons_held"] = _input->GetPortMask(port);
+
+	shared_ptr<IConsole> console = _emu->GetConsole();
+	shared_ptr<BaseControlDevice> device = (console && console->GetControlManager())
+		? console->GetControlManager()->GetControlDevice((uint8_t)(port - 1))
+		: nullptr;
+	if(!device) {
+		result["connected"] = false;
+		result["note"] = "no controller is plugged into port " + std::to_string(port);
+		return json{ {"result", result} };
+	}
+
+	result["connected"] = true;
+	result["controller_type"] = EnumToSnake(magic_enum::enum_name(device->GetControllerType()).data());
+
+	//State as of the console's last input poll - i.e. exactly what the game saw
+	json buttons = json::object();
+	json pressed = json::array();
+	for(const DeviceButtonName& button : device->GetKeyNameAssociations()) {
+		if(button.IsNumeric) {
+			if(button.ButtonId == BaseControlDevice::DeviceXCoordButtonId) {
+				buttons[button.Name] = device->GetCoordinates().X;
+			} else if(button.ButtonId == BaseControlDevice::DeviceYCoordButtonId) {
+				buttons[button.Name] = device->GetCoordinates().Y;
+			}
+		} else if(device->IsPressed((uint8_t)button.ButtonId)) {
+			buttons[button.Name] = true;
+			pressed.push_back(button.Name);
+		} else {
+			buttons[button.Name] = false;
+		}
+	}
+	result["buttons"] = buttons;
+	result["pressed"] = pressed;
+	return json{ {"result", result} };
 }
 
 //--- Savestates ---------------------------------------------------------------

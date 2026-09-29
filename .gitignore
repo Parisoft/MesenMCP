@@ -199,3 +199,5 @@ Mcp/tests/red.png
 !Mcp/tests/dbg-rom.nes
 Mcp/tests/smoke-home/
 Mcp/tests/e2e-home/
+Mcp/tests/input-home/
+__pycache__/

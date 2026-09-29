@@ -89,6 +89,7 @@ public:
 	//--- Tier 3/4 tools (input & validation) ---
 	json SetController(const json& args);
 	json ReleaseController(const json& args);
+	json GetControllerState(const json& args);
 	json SaveState(const json& args);
 	json LoadState(const json& args);
 	json RunLuaScript(const json& args);

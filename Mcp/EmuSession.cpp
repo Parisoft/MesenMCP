@@ -279,6 +279,11 @@ json EmuSession::LoadRom(const json& args)
 	//Emulation flags are reset while a ROM loads - apply the speed AFTER loading.
 	ApplySpeed(maximumSpeed);
 
+	//The core built a brand-new console (and control manager) for this ROM -
+	//re-attach the virtual controller provider to it, or set_controller presses
+	//would be silently dropped by the emulation thread.
+	_input->SyncRegistration();
+
 	return BuildStatus();
 }
 
@@ -320,6 +325,9 @@ json EmuSession::Reset(const json& args)
 
 	if(done.load()) {
 		watchdog.join();
+		//A power cycle reloads the ROM, which builds a brand-new console (and
+		//control manager) - re-attach the virtual controller provider to it.
+		_input->SyncRegistration();
 		return json{ {"result", powerCycle ? "power cycled" : "reset"} };
 	}
 
@@ -345,6 +353,7 @@ json EmuSession::Reset(const json& args)
 		if(!IsRomLoaded()) {
 			return ErrorResult("reset stalled (known CPU-halt + debugger deadlock) and the fallback reload failed");
 		}
+		_input->SyncRegistration(); //the fallback rebuilt the console
 		return json{ {"result", "reset (fallback: stop + reload after the reset path stalled)"} };
 	}
 	fallback.detach();
