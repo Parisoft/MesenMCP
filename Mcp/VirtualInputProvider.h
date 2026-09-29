@@ -4,6 +4,11 @@
 //consoles (the same IInputProvider mechanism movies use - see MesenMovie).
 //UpdateInputState() calls providers after the (headless: empty) key mappings,
 //so whatever we set here IS the controller state for that poll.
+//
+//Registration is NOT a one-shot affair: the core throws the console (and its
+//control manager, which owns the provider list) away and builds a new one on
+//every ROM load / power cycle / reload, so SyncRegistration() has to be called
+//again after each of those. See SyncRegistration() below.
 #pragma once
 #include "Core/Shared/Interfaces/IInputProvider.h"
 #include "Core/Shared/BaseControlDevice.h"
@@ -26,17 +31,57 @@ public:
 	{
 		bool Active = false;
 		uint16_t ButtonMask = 0;     //bit per controller button (order per console)
-		int32_t HoldFramesLeft = -1; //-1 = hold until changed; >=0 = auto-release countdown
+		int32_t HoldFramesLeft = -1; //-1 = hold until changed; 0 = expired; >0 = polls left
 	};
 
 	VirtualInputProvider(Emulator* emu) : _emu(emu)
 	{
-		_emu->RegisterInputProvider(this);
+		SyncRegistration();
 	}
 
 	~VirtualInputProvider()
 	{
-		_emu->UnregisterInputProvider(this);
+		//Unregister from the console we are attached to - if it still exists.
+		//EmuSession stops the emulator (which destroys the console) before this
+		//runs, so the weak_ptr is usually empty here.
+		std::shared_ptr<IConsole> console = _registeredConsole.lock();
+		if(console && console->GetControlManager()) {
+			console->GetControlManager()->UnregisterInputProvider(this);
+		}
+	}
+
+	//Makes sure this provider is on the input provider list of the console that
+	//is CURRENTLY loaded.
+	//
+	//Why this has to be called repeatedly: Emulator::RegisterInputProvider()
+	//forwards to the current console's control manager and silently does
+	//nothing when no console exists yet. Emulator::InternalLoadRom() then does
+	//`_console.reset(newConsole)` - a brand-new control manager with an EMPTY
+	//provider list - for every ROM load, power cycle (ReloadRom) and reload.
+	//A provider registered once in the constructor is therefore registered on
+	//nothing at all, and every set_controller call is silently ignored by the
+	//emulation thread (the tool still returns success).
+	//
+	//Cheap and idempotent: a no-op while the live console is the one we are
+	//already attached to.
+	void SyncRegistration()
+	{
+		std::shared_ptr<IConsole> console = _emu->GetConsole();
+		if(!console || !console->GetControlManager()) {
+			_registeredConsole.reset();
+			return;
+		}
+		if(console == _registeredConsole.lock()) {
+			return; //already attached to the live console
+		}
+		console->GetControlManager()->RegisterInputProvider(this);
+		_registeredConsole = console;
+	}
+
+	bool IsRegistered()
+	{
+		std::shared_ptr<IConsole> console = _emu->GetConsole();
+		return console && console == _registeredConsole.lock();
 	}
 
 	//Called on the emulation thread for every control device on every poll.
@@ -62,6 +107,13 @@ public:
 			return false;
 		}
 
+		if(state.HoldFramesLeft == 0) {
+			//Hold window used up - release. (hold_frames=0 starts here, so it
+			//presses nothing at all, as documented.)
+			state.ButtonMask = 0;
+			state.HoldFramesLeft = -1;
+		}
+
 		device->ClearState();
 		for(uint8_t bit = 0; bit < map->Count; bit++) {
 			if(state.ButtonMask & (1 << bit)) {
@@ -69,13 +121,10 @@ public:
 			}
 		}
 
-		//Count down hold frames once per poll of this port
+		//Count the hold window down once per poll of this port - the consoles
+		//poll their control devices exactly once per frame.
 		if(state.HoldFramesLeft > 0) {
 			state.HoldFramesLeft--;
-			if(state.HoldFramesLeft == 0) {
-				state.ButtonMask = 0;
-				state.HoldFramesLeft = -1;
-			}
 		}
 		return true;
 	}
@@ -89,6 +138,10 @@ public:
 			error = "port must be 1 to " + std::to_string(MaxPort);
 			return false;
 		}
+
+		//Attach to the live console before doing anything else - the buttons are
+		//only seen by the game if this provider is on that console's list.
+		SyncRegistration();
 
 		ControllerType type = GetControllerTypeForPort(port);
 		const ButtonMap* map = GetButtonMap(type);
@@ -207,4 +260,11 @@ private:
 	Emulator* _emu;
 	SimpleLock _lock;
 	std::array<PortState, MaxPort> _ports;
+
+	//Console this provider is currently registered with. The core replaces the
+	//console (and its control manager, which owns the provider list) on every
+	//ROM load / power cycle, so this is compared against the live console by
+	//SyncRegistration() and used to unregister in the destructor. Weak: never
+	//keeps a console alive.
+	std::weak_ptr<IConsole> _registeredConsole;
 };

@@ -10,7 +10,7 @@ mesen-mcp --rom game.nes --frames 300 --screenshot out.png   # quick CLI check
 mesen-mcp                                                    # MCP server on stdio
 ```
 
-49 tools covering the full debug/validate loop: load & drive the game, inspect and
+50 tools covering the full debug/validate loop: load & drive the game, inspect and
 patch memory, break/step/trace the CPU, look at the PPU (tilemaps, sprites, palette),
 verify audio, script arbitrary assertions in Lua, and record/replay regression tests.
 
@@ -42,7 +42,7 @@ The binary runs with no `$DISPLAY` — that is the intended environment.
 
 ### Cross-console e2e (optional)
 
-`python3 Mcp/tests/e2e_test.py` runs the **entire 49-tool surface** against real
+`python3 Mcp/tests/e2e_test.py` runs the **entire 50-tool surface** against real
 ROMs per console — NES, SNES and GBA zips plus a `gba-bios.bin` placed in
 `Mcp/tests/` (160 checks). The test auto-creates the session home and installs the
 BIOS where the core expects it (`<home>/Firmware/gba_bios.bin`).
@@ -72,7 +72,7 @@ Client config (Claude Desktop / any stdio MCP host):
 
 ---
 
-## Tool reference (49 tools)
+## Tool reference (50 tools)
 
 ### Session & lifecycle
 
@@ -134,6 +134,7 @@ session (it survives ROM reloads).
 |---|---|
 | `set_controller` | Virtual pads: buttons by name (`up/down/left/right/start/select/b/a` + `x/y/l/r` on SNES, `l/r` on GBA); `hold_frames` for exact-length presses |
 | `release_controller` | Release a port |
+| `get_controller_state` | What the console saw on its last input poll: controller type, every button, the pressed list, and whether the virtual pad is attached/overriding the port |
 | `save_state` / `load_state` | Exact CPU/RAM/PPU snapshots (files under `<home>/savestates`) |
 | `run_lua_script` | Mesen's Lua API: `emu.read(addr, emu.memType.nesMemory)`, `emu.write`, `emu.getMemorySize`, `emu.addEventCallback`, `emu.createSavestate`, HUD drawing…; output captured; resident scripts via `auto_stop:false` |
 | `get_lua_script_log` / `stop_lua_script` | Manage resident scripts |
@@ -188,8 +189,9 @@ timing is exact regardless of host speed (`max` mode just removes the throttling
 
 | Command | What it does |
 |---|---|
-| `make test` | Generates `Mcp/tests/red.nes` (hand-assembled mapper-0 ROM with a signature in zero page and a pulse tone) + runs the 97-check MCP smoke test |
-| `python3 Mcp/tests/e2e_test.py` | 160-check cross-console e2e over all 49 tools (needs the ROM zips + BIOS in `Mcp/tests/`) |
+| `make test` | Generates `Mcp/tests/red.nes` (hand-assembled mapper-0 ROM with a signature in zero page and a pulse tone) + runs the 97-check MCP smoke test + the controller input test |
+| `python3 Mcp/tests/input_test.py` | Controller input end-to-end: a fixture ROM (`input-test.nes`) reads $4016/$4017 itself, so every check proves the press reached the game (20 checks, +16 with the SNES/GBA fixtures) |
+| `python3 Mcp/tests/e2e_test.py` | 166-check cross-console e2e over all 50 tools (needs the ROM zips + BIOS in `Mcp/tests/`) |
 | `bin/mesen-mcp --rom ... --frames N --screenshot out.png` | P0 one-shot CLI: load, run, screenshot, exit |
 
 ## Known issues & limitations

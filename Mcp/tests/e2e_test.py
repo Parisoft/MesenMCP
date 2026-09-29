@@ -185,7 +185,17 @@ def battery(label, rom_path, console):
 
         # --- input / time travel ---
         ok(f"{label}: set_controller", "ERR" not in c.tool("set_controller", {"port": 1, "buttons": ["start"], "hold_frames": 5}))
+        #A held press must be visible to the console, not just accepted by the tool
+        c.tool("set_controller", {"port": 1, "buttons": ["start"]})
+        c.tool("run_frames", {"frames": 3, "timeout_ms": 20000})
+        cs = c.tool("get_controller_state", {"port": 1})
+        ok(f"{label}: get_controller_state", cs.get("provider_attached") is True
+           and "start" in (cs.get("pressed") or []), str(cs)[:140])
         ok(f"{label}: release_controller", "ERR" not in c.tool("release_controller", {"port": 1}))
+        c.tool("run_frames", {"frames": 2, "timeout_ms": 20000})  #let the next input poll land
+        cs = c.tool("get_controller_state", {"port": 1})
+        ok(f"{label}: controller released", cs.get("overriding") is False
+           and "start" not in (cs.get("pressed") or []), str(cs)[:140])
         sv = c.tool("save_state", {})
         ok(f"{label}: save_state", "path" in sv)
         ok(f"{label}: load_state", "ERR" not in c.tool("load_state", {"path": sv["path"]}))

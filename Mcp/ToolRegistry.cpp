@@ -520,20 +520,22 @@ ToolRegistry::ToolRegistry(EmuSession& session) : _session(session)
 		"Press buttons on a virtual controller. Buttons: up, down, left, right, start, "
 		"select, b, a (+ x, y, l, r on SNES; + l, r on GBA). Pass an empty list to release. "
 		"With hold_frames=N the buttons are held for exactly N frames (the tool advances "
-		"them for you); without it they stay held until the next set_controller call. Use "
-		"with run_frames + screenshot/read_memory to drive menus and gameplay.",
+		"them for you and returns once they are released); without it they stay held until "
+		"the next set_controller call. The console samples the pad once per frame, so pair "
+		"this with run_frames + screenshot/read_memory to drive menus and gameplay, and use "
+		"get_controller_state to confirm the press reached the emulator.",
 		ObjectSchema(
 			{
 				{"port", "integer"},
-				{"buttons", "integer"},
+				{"buttons", json::array({ "array", "string" })},
 				{"hold_frames", "integer"},
 				{"timeout_ms", "integer"}
 			},
 			{ "buttons" },
 			{
 				{"port", "controller port, 1-4 (default 1)"},
-				{"buttons", "array of button names, or a string like 'start' or 'a,start'"},
-				{"hold_frames", "hold the buttons for this many frames (default: until changed)"}
+				{"buttons", "array of button names, or a string like 'start' or 'a,start'. [] releases"},
+				{"hold_frames", "hold the buttons for this many frames, then release (default: until changed)"}
 			}),
 		[this](const json& args) { return _session.SetController(args); }
 	});
@@ -543,6 +545,17 @@ ToolRegistry::ToolRegistry(EmuSession& session) : _session(session)
 		"Release all buttons on a virtual controller and stop overriding it.",
 		ObjectSchema({ {"port", "integer"} }, {}, { {"port", "controller port (default 1)"} }),
 		[this](const json& args) { return _session.ReleaseController(args); }
+	});
+
+	Register({
+		"get_controller_state",
+		"What the console saw on its last input poll: the plugged-in controller type, every "
+		"button (pressed or not), the pressed-only list, whether the virtual controller is "
+		"attached to the running console (provider_attached) and currently overriding the port. "
+		"Use it to confirm a set_controller press actually reached the emulator before drawing "
+		"conclusions from the game's behaviour.",
+		ObjectSchema({ {"port", "integer"} }, {}, { {"port", "controller port, 1-4 (default 1)"} }),
+		[this](const json& args) { return _session.GetControllerState(args); }
 	});
 
 	Register({

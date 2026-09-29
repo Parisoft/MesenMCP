@@ -190,6 +190,11 @@ This is a plan only — no code has been changed.
    buttons for that port (mirror `MesenMovie::SetInput`). MCP tool state = per-port button mask +
    "hold for N frames" semantics implemented by counting `PpuFrameDone` notifications. Config-free
    fallback: `Debugger::SetInputOverrides` for force-held inputs while debugging.
+   *Gotcha (learned the hard way)*: the provider list lives on the **control manager**, and the core
+   builds a new console (new control manager, empty provider list) on every ROM load / power cycle.
+   Registering once at startup registers on nothing (`Emulator::RegisterInputProvider` no-ops while
+   no console exists), so the tool succeeds while the game sees no input at all -
+   `VirtualInputProvider::SyncRegistration()` has to run after every console creation.
 6. **Audio** (v2): either no `IAudioDevice` (safe) or `WavCaptureDevice` ring buffer +
    `get_audio_summary` (RMS/peak per channel, last N frames) and `capture_wav` (existing
    `WaveRecorder`) so agents can assert "music is actually playing / not silent / not clipping".
