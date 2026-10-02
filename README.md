@@ -34,6 +34,11 @@ Options:
 | `DEBUG=1` | unoptimized build with debug symbols |
 | `SANITIZER=address` / `SANITIZER=thread` | sanitizer build (compile **and** link) |
 | `CXX=clang++` / `CC=clang` | use Clang (usually faster code) |
+| `SDKROOT=<path>` | macOS only: SDK to build against (default: `xcrun --show-sdk-path`, passed as `-isysroot` automatically) |
+
+On macOS, install the Xcode Command Line Tools (`xcode-select --install`). If you build with a
+standalone LLVM instead (e.g. Homebrew's `llvm@15` via `CXX=...`), the makefile points it at the
+SDK for you - details in [COMPILING.md](COMPILING.md#macos).
 
 Note: the makefile has no header dependency tracking — after editing a header,
 `rm obj/<area>/*.o` (or `make clean`) to be safe.

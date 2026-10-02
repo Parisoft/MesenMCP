@@ -9,9 +9,12 @@
 #  DEBUG=1          - unoptimized build with debug info
 #  SANITIZER=address|thread - build with a sanitizer (DEBUG=1 recommended)
 #  CXX=/CC=         - compiler override (default: g++, clang++ also works)
+#  SDKROOT=<path>   - macOS only: SDK to build against (default: xcrun --show-sdk-path)
 
 CXX ?= g++
 CC ?= gcc
+
+UNAME_S := $(shell uname -s)
 
 DEBUG ?= 0
 SANITIZER ?=
@@ -26,6 +29,24 @@ ifeq ($(SANITIZER),address)
 	FLAGS += -fsanitize=address
 else ifeq ($(SANITIZER),thread)
 	FLAGS += -fsanitize=thread
+endif
+
+#macOS: Apple's /usr/bin/clang is a shim that finds the SDK on its own, but a standalone LLVM
+#(e.g. Homebrew's llvm@15) may have no default sysroot, so it can't see the C library headers
+#and fails with "'stdio.h' file not found" (libc++'s stdio.h does #include_next <stdio.h>).
+#Always point the compiler AND the linker at the SDK explicitly (harmless with Apple's clang).
+#An SDKROOT from the environment or the make command line wins over auto-detection.
+#(The warning is wrapped in an assignment on purpose: a bare tab-indented $(warning) line would be
+#parsed as a recipe line - "recipe commences before first target".)
+ifeq ($(UNAME_S),Darwin)
+	ifeq ($(strip $(SDKROOT)),)
+		SDKROOT := $(shell xcrun --show-sdk-path 2>/dev/null)
+	endif
+	ifeq ($(strip $(SDKROOT)),)
+		SDK_WARNING := $(warning macOS SDK not found - run "xcode-select --install" or set SDKROOT=<path to MacOSX.sdk>)
+	else
+		FLAGS += -isysroot "$(SDKROOT)"
+	endif
 endif
 
 #Note: Lua is included as "Lua/lua.hpp" - the repository root must be on the include path.
